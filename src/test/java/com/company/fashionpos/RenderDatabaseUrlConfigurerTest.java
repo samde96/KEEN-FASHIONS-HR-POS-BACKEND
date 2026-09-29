@@ -17,4 +17,15 @@ class RenderDatabaseUrlConfigurerTest {
     assertThat(connection.username()).isEqualTo("fashion_user");
     assertThat(connection.password()).isEqualTo("p@ssword");
   }
+
+  @Test
+  void prefersRenderDatabaseUrlWhenFashionPosUrlPointsToLocalhost() {
+    String selected =
+        RenderDatabaseUrlConfigurer.selectDatabaseUrl(
+            "jdbc:postgresql://localhost:5432/fashion_pos",
+            "postgresql://render_user:secret@dpg-example-a:5432/fashion_pos");
+
+    assertThat(selected)
+        .isEqualTo("postgresql://render_user:secret@dpg-example-a:5432/fashion_pos");
+  }
 }

@@ -19,7 +19,7 @@ final class RenderDatabaseUrlConfigurer {
     }
 
     String databaseUrl =
-        firstNonBlank(System.getenv("FASHIONPOS_DB_URL"), System.getenv("DATABASE_URL"));
+        selectDatabaseUrl(System.getenv("FASHIONPOS_DB_URL"), System.getenv("DATABASE_URL"));
     if (!hasText(databaseUrl)) {
       return;
     }
@@ -61,6 +61,13 @@ final class RenderDatabaseUrlConfigurer {
         jdbcUrl.toString(), credentials.username(), credentials.password());
   }
 
+  static String selectDatabaseUrl(String fashionPosDbUrl, String databaseUrl) {
+    if (hasText(databaseUrl) && isLocalPostgresUrl(fashionPosDbUrl)) {
+      return databaseUrl;
+    }
+    return firstNonBlank(fashionPosDbUrl, databaseUrl);
+  }
+
   private static Credentials credentialsFrom(String rawUserInfo) {
     if (!hasText(rawUserInfo)) {
       return new Credentials(null, null);
@@ -94,6 +101,24 @@ final class RenderDatabaseUrlConfigurer {
 
   private static boolean isPostgresUrl(String value) {
     return value.startsWith("postgresql://") || value.startsWith("postgres://");
+  }
+
+  private static boolean isLocalPostgresUrl(String value) {
+    if (!hasText(value)) {
+      return false;
+    }
+
+    String uriValue = value.startsWith("jdbc:postgresql://") ? value.substring(5) : value;
+    if (!isPostgresUrl(uriValue)) {
+      return false;
+    }
+
+    try {
+      String host = URI.create(uriValue).getHost();
+      return "localhost".equalsIgnoreCase(host) || "127.0.0.1".equals(host) || "::1".equals(host);
+    } catch (IllegalArgumentException ex) {
+      return false;
+    }
   }
 
   private static String firstNonBlank(String first, String second) {
