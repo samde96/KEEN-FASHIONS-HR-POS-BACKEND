@@ -28,4 +28,22 @@ class RenderDatabaseUrlConfigurerTest {
     assertThat(selected)
         .isEqualTo("postgresql://render_user:secret@dpg-example-a:5432/fashion_pos");
   }
+
+  @Test
+  void replacesSpringDatasourceUrlWhenItPointsToLocalhost() {
+    assertThat(
+            RenderDatabaseUrlConfigurer.shouldReplaceLocalDatasourceUrl(
+                "jdbc:postgresql://localhost:5432/fashion_pos",
+                "postgresql://render_user:secret@dpg-example-a:5432/fashion_pos"))
+        .isTrue();
+  }
+
+  @Test
+  void preservesSpringDatasourceUrlWhenItPointsToExternalDatabase() {
+    assertThat(
+            RenderDatabaseUrlConfigurer.shouldReplaceLocalDatasourceUrl(
+                "jdbc:postgresql://database.example.com:5432/fashion_pos",
+                "postgresql://render_user:secret@dpg-example-a:5432/fashion_pos"))
+        .isFalse();
+  }
 }

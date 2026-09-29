@@ -13,13 +13,18 @@ final class RenderDatabaseUrlConfigurer {
   private RenderDatabaseUrlConfigurer() {}
 
   static void apply() {
-    if (hasText(System.getProperty(SPRING_DATASOURCE_URL))
-        || hasText(System.getenv("SPRING_DATASOURCE_URL"))) {
+    String existingDatasourceUrl =
+        firstNonBlank(
+            System.getProperty(SPRING_DATASOURCE_URL), System.getenv("SPRING_DATASOURCE_URL"));
+    String databaseUrl =
+        selectDatabaseUrl(System.getenv("FASHIONPOS_DB_URL"), System.getenv("DATABASE_URL"));
+    boolean replaceLocalDatasourceUrl =
+        shouldReplaceLocalDatasourceUrl(existingDatasourceUrl, databaseUrl);
+
+    if (hasText(existingDatasourceUrl) && !replaceLocalDatasourceUrl) {
       return;
     }
 
-    String databaseUrl =
-        selectDatabaseUrl(System.getenv("FASHIONPOS_DB_URL"), System.getenv("DATABASE_URL"));
     if (!hasText(databaseUrl)) {
       return;
     }
@@ -35,8 +40,16 @@ final class RenderDatabaseUrlConfigurer {
 
     DatabaseConnection connection = fromPostgresUrl(databaseUrl);
     System.setProperty(SPRING_DATASOURCE_URL, connection.jdbcUrl());
-    setIfMissing(SPRING_DATASOURCE_USERNAME, "SPRING_DATASOURCE_USERNAME", connection.username());
-    setIfMissing(SPRING_DATASOURCE_PASSWORD, "SPRING_DATASOURCE_PASSWORD", connection.password());
+    setCredentialProperty(
+        SPRING_DATASOURCE_USERNAME,
+        "SPRING_DATASOURCE_USERNAME",
+        connection.username(),
+        replaceLocalDatasourceUrl);
+    setCredentialProperty(
+        SPRING_DATASOURCE_PASSWORD,
+        "SPRING_DATASOURCE_PASSWORD",
+        connection.password(),
+        replaceLocalDatasourceUrl);
   }
 
   static DatabaseConnection fromPostgresUrl(String databaseUrl) {
@@ -68,6 +81,10 @@ final class RenderDatabaseUrlConfigurer {
     return firstNonBlank(fashionPosDbUrl, databaseUrl);
   }
 
+  static boolean shouldReplaceLocalDatasourceUrl(String existingDatasourceUrl, String databaseUrl) {
+    return hasText(databaseUrl) && isLocalPostgresUrl(existingDatasourceUrl);
+  }
+
   private static Credentials credentialsFrom(String rawUserInfo) {
     if (!hasText(rawUserInfo)) {
       return new Credentials(null, null);
@@ -79,12 +96,17 @@ final class RenderDatabaseUrlConfigurer {
     return new Credentials(username, password);
   }
 
-  private static void setIfMissing(String propertyName, String envName, String value) {
-    if (!hasText(value)
-        || hasText(System.getProperty(propertyName))
-        || hasText(System.getenv(envName))) {
+  private static void setCredentialProperty(
+      String propertyName, String envName, String value, boolean overwriteExisting) {
+    if (!hasText(value)) {
       return;
     }
+
+    if (!overwriteExisting
+        && (hasText(System.getProperty(propertyName)) || hasText(System.getenv(envName)))) {
+      return;
+    }
+
     System.setProperty(propertyName, value);
   }
 
