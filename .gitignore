@@ -1,0 +1,49 @@
+# Build output
+target/
+out/
+*.class
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+
+# Maven/local runtime artifacts
+.mvn/wrapper/maven-wrapper.jar
+.mvn/timing.properties
+dependency-reduced-pom.xml
+hs_err_pid*
+replay_pid*
+
+# Local databases
+*.h2.db
+*.mv.db
+*.trace.db
+*.sqlite
+*.sqlite3
+
+# Logs and scratch API output
+*.log
+*.err.log
+ai_resp*.json
+chat_payload.json
+csrf_*.json
+curl_*.json
+curl_*.txt
+cookies*.txt
+headers*.txt
+login_payload.json
+login_resp*.json
+response_body.json
+resp_headers.txt
+
+# IDE metadata
+.classpath
+.project
+.settings/
+.factorypath

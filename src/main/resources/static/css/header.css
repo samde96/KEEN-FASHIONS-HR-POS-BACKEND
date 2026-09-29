@@ -1,0 +1,3 @@
+.site-header{box-shadow:0 1px 0 rgba(0,0,0,0.03)}
+.site-header .logout-btn{background:#ef4444;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer}
+.site-header .logout-btn:hover{opacity:0.95}

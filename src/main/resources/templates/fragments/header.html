@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="site-header">
+  <header class="site-header" style="display:flex;justify-content:space-between;align-items:center;padding:8px 16px;background:#fff;border-bottom:1px solid #e6e6e6">
+    <div class="brand" style="font-weight:700;color:#2a6b48;font-size:18px">Keen Fashion POS</div>
+    <div class="nav">
+      <!-- Show logout when a user is authenticated -->
+      <form th:action="@{/logout}" method="post" th:if="${#httpServletRequest.remoteUser != null}" style="display:inline">
+        <!-- If CSRF is enabled in your config, include tokens; CSRF is disabled in current security config so this is optional -->
+        <button type="submit" class="logout-btn">Logout</button>
+      </form>
+    </div>
+  </header>
+</div>
+</body>
+</html>

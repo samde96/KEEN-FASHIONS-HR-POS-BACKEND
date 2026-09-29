@@ -1,0 +1,80 @@
+server:
+  port: ${PORT:8080}
+  forward-headers-strategy: framework
+  servlet:
+    session:
+      timeout: ${FASHIONPOS_SESSION_TIMEOUT:30m}
+      cookie:
+        http-only: true
+        secure: ${FASHIONPOS_SESSION_COOKIE_SECURE:false}
+        same-site: ${FASHIONPOS_SESSION_COOKIE_SAME_SITE:lax}
+        path: /
+  error:
+    include-message: never
+    include-stacktrace: never
+    include-binding-errors: never
+
+spring:
+  config:
+    import:
+      - optional:file:../.env[.properties]
+      - optional:file:.env[.properties]
+  application:
+    name: keen-fashion-pos
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 11MB
+  datasource:
+    url: ${FASHIONPOS_DB_URL:jdbc:postgresql://localhost:5432/fashion_pos}
+    username: ${FASHIONPOS_DB_USERNAME:fashion_pos_app}
+    password: ${FASHIONPOS_DB_PASSWORD:change-me-local-only}
+  flyway:
+    enabled: true
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  jackson:
+    default-property-inclusion: non_null
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /docs
+
+app:
+  bootstrap:
+    organization-name: ${FASHIONPOS_ORGANIZATION_NAME:KEEN Fashions}
+    currency-code: ${FASHIONPOS_CURRENCY_CODE:KES}
+    time-zone: ${FASHIONPOS_TIME_ZONE:Africa/Nairobi}
+    admin-display-name: ${FASHIONPOS_ADMIN_DISPLAY_NAME:Samuel Maina}
+  security:
+    admin-email: ${FASHIONPOS_ADMIN_EMAIL}
+    admin-password: ${FASHIONPOS_ADMIN_PASSWORD}
+    manager-email: ${FASHIONPOS_MANAGER_EMAIL:}
+    manager-password: ${FASHIONPOS_MANAGER_PASSWORD:}
+    cors:
+      allowed-origin: ${FASHIONPOS_CORS_ALLOWED_ORIGIN:http://localhost:5173}
+      allowed-origins: ${FASHIONPOS_CORS_ALLOWED_ORIGINS:${FASHIONPOS_CORS_ALLOWED_ORIGIN:http://localhost:5173}}
+    rate-limit:
+      login:
+        enabled: ${FASHIONPOS_LOGIN_RATE_LIMIT_ENABLED:true}
+        max-failed-attempts: ${FASHIONPOS_LOGIN_MAX_FAILED_ATTEMPTS:5}
+        window: ${FASHIONPOS_LOGIN_RATE_LIMIT_WINDOW:15m}
+        lockout: ${FASHIONPOS_LOGIN_RATE_LIMIT_LOCKOUT:15m}
