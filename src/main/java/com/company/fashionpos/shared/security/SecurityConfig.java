@@ -43,9 +43,17 @@ public class SecurityConfig {
 
   private static final String ADMIN_ROLE = "ROLE_ADMIN";
   private static final String ADMIN_MANAGE = "admin:manage";
+  private static final String ACCOUNTING_MANAGE = "accounting:manage";
+  private static final String ACCOUNTING_VIEW = "accounting:view";
   private static final String INVENTORY_ADJUST = "inventory:adjust";
   private static final String INVENTORY_RECEIVE = "inventory:receive";
+  private static final String AUDIT_VIEW = "audit:view";
+  private static final String COMMERCIAL_MANAGE = "commercial:manage";
+  private static final String CRM_MANAGE = "crm:manage";
+  private static final String ETIMS_MANAGE = "etims:manage";
+  private static final String NOTIFICATIONS_VIEW = "notifications:view";
   private static final String POS_SELL = "pos:sell";
+  private static final String PROCUREMENT_MANAGE = "procurement:manage";
   private static final String REPORTS_VIEW = "reports:view";
   private static final String SALES_VIEW = "sales:view";
   private static final String TRANSFER_CREATE = "transfer:create";
@@ -99,6 +107,24 @@ public class SecurityConfig {
                     .requestMatchers(
                         HttpMethod.GET, "/api/v1/roles", "/api/v1/permissions", "/api/v1/users")
                     .hasAuthority(ADMIN_MANAGE)
+                    .requestMatchers(HttpMethod.GET, "/api/v1/procurement/**")
+                    .hasAnyAuthority(ADMIN_MANAGE, PROCUREMENT_MANAGE, REPORTS_VIEW)
+                    .requestMatchers(HttpMethod.GET, "/api/v1/customers/**")
+                    .hasAnyAuthority(ADMIN_MANAGE, COMMERCIAL_MANAGE, CRM_MANAGE, SALES_VIEW)
+                    .requestMatchers(HttpMethod.GET, "/api/v1/crm/**")
+                    .hasAnyAuthority(ADMIN_MANAGE, CRM_MANAGE, SALES_VIEW, REPORTS_VIEW)
+                    .requestMatchers(HttpMethod.GET, "/api/v1/commercial/**")
+                    .hasAnyAuthority(ADMIN_MANAGE, COMMERCIAL_MANAGE, SALES_VIEW, REPORTS_VIEW)
+                    .requestMatchers(HttpMethod.GET, "/api/v1/accounting/**")
+                    .hasAnyAuthority(ADMIN_MANAGE, ACCOUNTING_VIEW, ACCOUNTING_MANAGE, REPORTS_VIEW)
+                    .requestMatchers("/api/v1/accounting/**")
+                    .hasAnyAuthority(ADMIN_MANAGE, ACCOUNTING_MANAGE)
+                    .requestMatchers(HttpMethod.GET, "/api/v1/etims/**")
+                    .hasAnyAuthority(ADMIN_MANAGE, ETIMS_MANAGE, REPORTS_VIEW)
+                    .requestMatchers(HttpMethod.GET, "/api/v1/notifications/**")
+                    .hasAnyAuthority(ADMIN_MANAGE, NOTIFICATIONS_VIEW)
+                    .requestMatchers(HttpMethod.GET, "/api/v1/audit-events")
+                    .hasAnyAuthority(ADMIN_MANAGE, AUDIT_VIEW)
                     .requestMatchers(
                         "/api/v1/roles",
                         "/api/v1/roles/**",

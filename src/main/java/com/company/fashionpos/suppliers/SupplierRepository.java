@@ -43,11 +43,36 @@ public interface SupplierRepository extends JpaRepository<Supplier, UUID> {
             select count(supplier) > 0
             from Supplier supplier
             where supplier.organization.id = :organizationId
+              and supplier.supplierCode is not null
+              and lower(supplier.supplierCode) = lower(:supplierCode)
+            """)
+  boolean existsBySupplierCodeWithinOrganization(
+      @Param("organizationId") UUID organizationId, @Param("supplierCode") String supplierCode);
+
+  @Query(
+      """
+            select count(supplier) > 0
+            from Supplier supplier
+            where supplier.organization.id = :organizationId
               and lower(supplier.name) = lower(:name)
               and supplier.id <> :supplierId
             """)
   boolean existsByNameWithinOrganizationExcludingSupplier(
       @Param("organizationId") UUID organizationId,
       @Param("name") String name,
+      @Param("supplierId") UUID supplierId);
+
+  @Query(
+      """
+            select count(supplier) > 0
+            from Supplier supplier
+            where supplier.organization.id = :organizationId
+              and supplier.supplierCode is not null
+              and lower(supplier.supplierCode) = lower(:supplierCode)
+              and supplier.id <> :supplierId
+            """)
+  boolean existsBySupplierCodeWithinOrganizationExcludingSupplier(
+      @Param("organizationId") UUID organizationId,
+      @Param("supplierCode") String supplierCode,
       @Param("supplierId") UUID supplierId);
 }

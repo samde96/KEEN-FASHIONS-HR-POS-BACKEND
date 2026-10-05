@@ -4,6 +4,8 @@ import com.company.fashionpos.organization.Organization;
 import com.company.fashionpos.organization.OrganizationRepository;
 import com.company.fashionpos.shared.security.AuthenticatedUser;
 import jakarta.persistence.EntityNotFoundException;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -34,6 +36,12 @@ public class SupplierService {
     if (supplierRepository.existsByNameWithinOrganization(user.organizationId(), name)) {
       throw new IllegalArgumentException("Supplier name is already used");
     }
+    String supplierCode = normalizeOptional(request.supplierCode());
+    if (supplierCode != null
+        && supplierRepository.existsBySupplierCodeWithinOrganization(
+            user.organizationId(), supplierCode)) {
+      throw new IllegalArgumentException("Supplier code is already used");
+    }
 
     Organization organization =
         organizationRepository
@@ -56,6 +64,12 @@ public class SupplierService {
         user.organizationId(), name, supplierId)) {
       throw new IllegalArgumentException("Supplier name is already used");
     }
+    String supplierCode = normalizeOptional(request.supplierCode());
+    if (supplierCode != null
+        && supplierRepository.existsBySupplierCodeWithinOrganizationExcludingSupplier(
+            user.organizationId(), supplierCode, supplierId)) {
+      throw new IllegalArgumentException("Supplier code is already used");
+    }
 
     updateSupplierDetails(supplier, request, name);
     return SupplierResponse.from(supplier);
@@ -74,9 +88,18 @@ public class SupplierService {
       Supplier supplier, SupplierRequest request, String name) {
     supplier.updateDetails(
         name,
+        normalizeOptional(request.supplierCode()),
+        normalizeOptional(request.companyName()),
         normalizeOptional(request.contactPerson()),
         normalizeOptional(request.phone()),
         normalizeOptional(request.email()),
+        normalizeOptional(request.address()),
+        normalizeOptional(request.kraPin()),
+        normalizeOptional(request.paymentTerms()),
+        nonNegativeMoney(request.creditLimit(), "Credit limit"),
+        normalizeOptional(request.bankDetails()),
+        normalizeOptional(request.productsSupplied()),
+        nonNegativeMoney(request.outstandingBalance(), "Outstanding balance"),
         normalizeOptional(request.notes()),
         statusOrActive(request.status()));
   }
@@ -94,5 +117,15 @@ public class SupplierService {
 
   private static SupplierStatus statusOrActive(SupplierStatus status) {
     return status == null ? SupplierStatus.ACTIVE : status;
+  }
+
+  private static BigDecimal nonNegativeMoney(BigDecimal value, String label) {
+    if (value == null) {
+      return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+    }
+    if (value.signum() < 0) {
+      throw new IllegalArgumentException(label + " cannot be negative");
+    }
+    return value.setScale(2, RoundingMode.HALF_UP);
   }
 }
