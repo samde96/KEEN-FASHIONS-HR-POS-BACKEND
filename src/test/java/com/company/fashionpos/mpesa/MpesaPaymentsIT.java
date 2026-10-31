@@ -544,4 +544,128 @@ class MpesaPaymentsIT {
             sale.lines());
     assertThat(sales.createSale(operator, key, finalRequest).payments()).hasSize(2);
   }
+
+  @Test
+  void offlineHttpEnvelopeRecordsManualMpesaOnceEvenWhenStkIsEnabled() throws Exception {
+    var operation =
+        new com.company.fashionpos.offline.OfflineOperationService.Request(
+            UUID.randomUUID(),
+            userId,
+            Instant.now(),
+            "SALE",
+            json.valueToTree(
+                new SaleService.DeviceSale(
+                    sale,
+                    key,
+                    List.of(
+                        new SaleService.DevicePrice(
+                            product, BigDecimal.valueOf(100), VatCategory.G)),
+                    true)),
+            List.of());
+    for (int retry = 0; retry < 2; retry++)
+      http.perform(
+              post("/api/v1/offline/operations")
+                  .with(
+                      user(operator.email())
+                          .authorities(new SimpleGrantedAuthority("admin:manage")))
+                  .with(csrf())
+                  .contentType("application/json")
+                  .content(json.writeValueAsBytes(operation)))
+          .andExpect(status().isOk())
+          .andExpect(jsonPath("$.id").value(operation.id().toString()))
+          .andExpect(jsonPath("$.result.payments[0].method").value("MPESA"));
+    assertThat(
+            jdbc.queryForObject(
+                "select count(*) from sales where organization_id=? and idempotency_key=?",
+                Integer.class,
+                org,
+                key))
+        .isEqualTo(1);
+    assertThat(
+            jdbc.queryForObject(
+                "select quantity_on_hand from inventory_items where branch_id=? and product_id=?",
+                Integer.class,
+                branch,
+                product))
+        .isEqualTo(9);
+    verify(daraja, never()).push(any());
+  }
+
+  @Test
+  void aPendingStkCheckoutCannotBeRecordedAsManualMpesaThroughOfflineSync() throws Exception {
+    start();
+    var operation =
+        new com.company.fashionpos.offline.OfflineOperationService.Request(
+            UUID.randomUUID(),
+            userId,
+            Instant.now(),
+            "SALE",
+            json.valueToTree(
+                new SaleService.DeviceSale(
+                    sale,
+                    key,
+                    List.of(
+                        new SaleService.DevicePrice(
+                            product, BigDecimal.valueOf(100), VatCategory.G)),
+                    true)),
+            List.of());
+    http.perform(
+            post("/api/v1/offline/operations")
+                .with(
+                    user(operator.email()).authorities(new SimpleGrantedAuthority("admin:manage")))
+                .with(csrf())
+                .contentType("application/json")
+                .content(json.writeValueAsBytes(operation)))
+        .andExpect(status().isConflict());
+    assertThat(
+            jdbc.queryForObject(
+                "select count(*) from sales where organization_id=? and idempotency_key=?",
+                Integer.class,
+                org,
+                key))
+        .isZero();
+    assertThat(
+            jdbc.queryForObject(
+                "select quantity_on_hand from inventory_items where branch_id=? and product_id=?",
+                Integer.class,
+                branch,
+                product))
+        .isEqualTo(10);
+  }
+
+  @Test
+  void stockReceivingStaffCanPrepareSupplierNamesWithoutPrivateSupplierDetails() throws Exception {
+    UUID receiverRole = UUID.randomUUID();
+    jdbc.update(
+        "insert into roles(id,organization_id,name,role_key) values (?,?,? ,?)",
+        receiverRole,
+        org,
+        "Receiver " + receiverRole,
+        "RECEIVER_" + receiverRole.toString().substring(0, 8));
+    jdbc.update(
+        "insert into role_permissions(role_id,permission_id) select ?,id from permissions where code='inventory:receive'",
+        receiverRole);
+    jdbc.update("delete from user_roles where user_id=?", userId);
+    jdbc.update("insert into user_roles(user_id,role_id) values (?,?)", userId, receiverRole);
+    jdbc.update(
+        "insert into suppliers(id,organization_id,name,company_name,status,bank_details) values (?,?,?,'Supplier Company','ACTIVE','private-test-bank-details')",
+        UUID.randomUUID(),
+        org,
+        "Stock Supplier");
+    http.perform(
+            get("/api/v1/offline/operations/suppliers")
+                .with(
+                    user(operator.email())
+                        .authorities(new SimpleGrantedAuthority("inventory:receive"))))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$[0].name").exists())
+        .andExpect(jsonPath("$[0].bankDetails").doesNotExist())
+        .andExpect(jsonPath("$[0].bank_details").doesNotExist());
+    http.perform(
+            get("/api/v1/suppliers")
+                .with(
+                    user(operator.email())
+                        .authorities(new SimpleGrantedAuthority("inventory:receive"))))
+        .andExpect(status().isForbidden());
+  }
 }

@@ -107,6 +107,10 @@ public class StockAdjustment {
     createdAt = createdAt == null ? now : createdAt;
   }
 
+  public void recordOccurredAt(Instant occurredAt) {
+    if (occurredAt != null) adjustedAt = occurredAt;
+  }
+
   public UUID getId() {
     return id;
   }

@@ -35,6 +35,8 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers;
 @SpringBootTest(
     properties = {
       "app.daily-summary.scheduler-enabled=false",
+      "app.mpesa.enabled=false",
+      "app.mpesa.scheduler-enabled=false",
       "app.security.admin-email=pos-test@example.test",
       "app.security.admin-password=test-password-only"
     })

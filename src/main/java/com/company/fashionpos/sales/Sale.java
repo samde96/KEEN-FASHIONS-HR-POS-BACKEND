@@ -159,4 +159,8 @@ public class Sale {
   public Instant getSoldAt() {
     return soldAt;
   }
+
+  public void setSoldAt(Instant soldAt) {
+    this.soldAt = soldAt;
+  }
 }

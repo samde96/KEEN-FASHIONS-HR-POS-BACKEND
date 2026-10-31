@@ -21,6 +21,14 @@ public class StockIntake {
 
   @Id private UUID id;
 
+  @Column(name = "stock_operation_id")
+  private UUID stockOperationId;
+
+  public void recordOperation(UUID operationId, Instant occurredAt) {
+    stockOperationId = operationId;
+    if (occurredAt != null) receivedAt = occurredAt;
+  }
+
   @ManyToOne(fetch = FetchType.LAZY, optional = false)
   @JoinColumn(name = "organization_id", nullable = false)
   private Organization organization;

@@ -524,6 +524,27 @@ public class MpesaLedger {
     return value.isMissingNode() || value.isNull() ? null : value.asText();
   }
 
+  /** Manual M-Pesa is a staff recorded tender, never a claim of provider verification. */
+  @Transactional
+  public void requireManualCheckout(AuthenticatedUser user, String key, SaleRequest request) {
+    // Also inspect the original checkout key: switching a pending STK to manual must
+    // never strand a real customer charge or record a second payment.
+    String original = key.startsWith("device:") ? key.substring(7) : key;
+    Integer count =
+        jdbc.queryForObject(
+            "select count(*) from mpesa_transactions where organization_id=? and idempotency_key in (?,?)",
+            Integer.class,
+            user.organizationId(),
+            key,
+            original);
+    if (count != null && count > 0)
+      throw conflict(
+          "This checkout has an STK request. Reconcile it before recording a manual payment");
+    if (request.payments() == null
+        || request.payments().stream().noneMatch(p -> p.method() == PaymentMethod.MPESA))
+      throw new IllegalArgumentException("Manual M-Pesa mode requires an M-Pesa tender");
+  }
+
   static String identifier(JsonNode node, String field) {
     String value = text(node, field);
     if (value == null || !value.matches("[A-Za-z0-9_-]{1,160}"))

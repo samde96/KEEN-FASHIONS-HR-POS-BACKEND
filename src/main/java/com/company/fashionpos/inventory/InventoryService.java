@@ -80,6 +80,12 @@ public class InventoryService {
   @Transactional
   public StockAdjustmentResponse adjustStock(
       AuthenticatedUser user, StockAdjustmentRequest request) {
+    return adjustStock(user, request, null);
+  }
+
+  @Transactional
+  public StockAdjustmentResponse adjustStock(
+      AuthenticatedUser user, StockAdjustmentRequest request, java.time.Instant occurredAt) {
     branchService.requireBranchAccess(user, request.branchId());
 
     ProductItem product = requireProduct(user, request.productId());
@@ -112,6 +118,7 @@ public class InventoryService {
             excessValue,
             normalizeRequired(request.reason(), "Reason"),
             normalizeOptional(request.notes()));
+    adjustment.recordOccurredAt(occurredAt);
     return StockAdjustmentResponse.from(stockAdjustmentRepository.save(adjustment));
   }
 
@@ -125,6 +132,15 @@ public class InventoryService {
 
   @Transactional
   public StockIntakeResponse addStock(AuthenticatedUser user, StockIntakeRequest request) {
+    return addStock(user, request, null, null);
+  }
+
+  @Transactional
+  public StockIntakeResponse addStock(
+      AuthenticatedUser user,
+      StockIntakeRequest request,
+      UUID operationId,
+      java.time.Instant occurredAt) {
     requirePositive(request.quantity());
     branchService.requireBranchAccess(user, request.branchId());
 
@@ -149,7 +165,16 @@ public class InventoryService {
             request.quantity(),
             money(unitCost),
             normalizeOptional(request.notes()));
+    intake.recordOperation(operationId, occurredAt);
     return StockIntakeResponse.from(stockIntakeRepository.save(intake));
+  }
+
+  @Transactional(readOnly = true)
+  public List<StockIntakeResponse> listOperationIntakes(AuthenticatedUser user, UUID operationId) {
+    return stockIntakeRepository.findForOperation(user.organizationId(), operationId).stream()
+        .filter(intake -> canAccessBranch(user, intake.getBranch().getId()))
+        .map(StockIntakeResponse::from)
+        .toList();
   }
 
   private InventoryItem getOrCreateInventory(
@@ -157,6 +182,56 @@ public class InventoryService {
     return inventoryRepository
         .findForMutation(organization.getId(), branch.getId(), product.getId())
         .orElseGet(() -> new InventoryItem(UUID.randomUUID(), organization, branch, product));
+  }
+
+  public record TransferLine(
+      @jakarta.validation.constraints.NotNull UUID productId,
+      @jakarta.validation.constraints.Positive int quantity) {}
+
+  public record TransferRequest(
+      @jakarta.validation.constraints.NotNull UUID sourceBranchId,
+      @jakarta.validation.constraints.NotNull UUID destinationBranchId,
+      @jakarta.validation.constraints.NotEmpty @jakarta.validation.constraints.Size(max = 200)
+          List<@jakarta.validation.Valid TransferLine> lines,
+      @jakarta.validation.constraints.Size(max = 500) String notes) {}
+
+  @Transactional
+  public TransferRequest transferStock(AuthenticatedUser user, TransferRequest request) {
+    if (request.sourceBranchId().equals(request.destinationBranchId()))
+      throw new IllegalArgumentException("Select two different shops or warehouses");
+    branchService.requireBranchAccess(user, request.sourceBranchId());
+    branchService.requireBranchAccess(user, request.destinationBranchId());
+    Branch source = requireBranch(user, request.sourceBranchId());
+    Branch destination = requireBranch(user, request.destinationBranchId());
+    if (source.getStatus() != com.company.fashionpos.branch.BranchStatus.ACTIVE
+        || destination.getStatus() != com.company.fashionpos.branch.BranchStatus.ACTIVE)
+      throw new IllegalArgumentException("Transfers require two active locations");
+    var quantities = new java.util.TreeMap<UUID, Integer>();
+    for (var line : request.lines())
+      quantities.merge(line.productId(), line.quantity(), Math::addExact);
+    for (var line : quantities.entrySet()) {
+      ProductItem product = requireProduct(user, line.getKey());
+      // Product locks precede inventory locks in sales, receipts and transfers.
+      var from = getOrCreateInventory(product.getOrganization(), source, product);
+      var to = getOrCreateInventory(product.getOrganization(), destination, product);
+      from.removeStock(line.getValue());
+      to.addStock(line.getValue());
+      inventoryRepository.save(from);
+      inventoryRepository.save(to);
+    }
+    return request;
+  }
+
+  @Transactional
+  public void requireExpectedQuantity(
+      AuthenticatedUser user, UUID branchId, UUID productId, int expected) {
+    branchService.requireBranchAccess(user, branchId);
+    ProductItem product = requireProduct(user, productId);
+    InventoryItem item =
+        getOrCreateInventory(product.getOrganization(), requireBranch(user, branchId), product);
+    if (expected < 0 || item.getQuantityOnHand() != expected)
+      throw new IllegalArgumentException(
+          "Stock changed since this count was recorded. Review the saved count before retrying; it has not been discarded");
   }
 
   private ProductItem requireProduct(AuthenticatedUser user, UUID productId) {

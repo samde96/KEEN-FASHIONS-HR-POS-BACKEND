@@ -97,6 +97,8 @@ public class SecurityConfig {
                     .permitAll()
                     .requestMatchers("/api/v1/mpesa/**")
                     .hasAnyAuthority(ADMIN_MANAGE, POS_SELL)
+                    .requestMatchers("/api/v1/offline/**")
+                    .authenticated()
                     .requestMatchers(
                         HttpMethod.GET,
                         "/api/v1/me",

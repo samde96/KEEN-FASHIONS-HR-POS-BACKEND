@@ -7,6 +7,10 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface StockIntakeRepository extends JpaRepository<StockIntake, UUID> {
+  @Query(
+      "select intake from StockIntake intake join fetch intake.branch join fetch intake.product product join fetch product.category where intake.organization.id=:organizationId and intake.stockOperationId=:operationId order by intake.receivedAt,intake.id")
+  List<StockIntake> findForOperation(
+      @Param("organizationId") UUID organizationId, @Param("operationId") UUID operationId);
 
   @Query(
       """

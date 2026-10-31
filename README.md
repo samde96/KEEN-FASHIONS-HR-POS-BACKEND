@@ -48,6 +48,20 @@ The Blueprint retains free plans for an initial evaluation. Free Render web serv
 
 Configure Resend and M-Pesa values from `.env.example` directly in Render's environment settings. M-Pesa stays disabled until `MPESA_ENABLED=true`; configure all payment credentials, callback security settings, and the public HTTPS `MPESA_CALLBACK_BASE_URL` before enabling it. Keep `MPESA_ENCRYPTION_KEY` stable across deployments so stored payment credentials remain readable. The Render Blueprint intentionally contains no payment or email secrets.
 
+## Offline synchronization
+
+Deploy this backend before the matching offline frontend. Flyway migration **V34** adds the permanent `offline_operations` acknowledgement ledger, snapshot revision sequence, and published catalogue price history. `POST /api/v1/offline/operations` accepts a client UUID, original operator/time, operation kind and payload. Supported kinds are `SALE`, `STOCK_RECEIPT`, `STOCK_INTAKE`, `STOCK_TRANSFER` and `STOCK_ADJUSTMENT`.
+
+Each operation and its receipt commit in one PostgreSQL transaction. Organization/operator scoping, current permissions, branch access, stock availability, payment totals and catalogue price history are rechecked. Cash and manual M-Pesa can sync without an STK transaction; manual payments never become provider-verified receipts. Existing STK checkouts retain normal verification. The server returns receipts, discovered acknowledgements and an inventory snapshot revision so browser retries and overlapping tabs remain safe.
+
+Retain this ledger and price history in database backups. Do not truncate acknowledgements while devices or old backups may retry. Redis is not needed for offline operation or duplicate protection. Device storage, enrollment, backup recovery and conflict handling are documented in [OFFLINE.md](OFFLINE.md).
+
+Run real transaction/concurrency checks in an isolated local PostgreSQL instance:
+
+```powershell
+python scripts/run-local-pos-integration.py --tests OfflineOperationsIT
+```
+
 ## GitHub contents
 
 Keep application source, SQL migrations, tests, `scripts/`, Maven configuration, deployment files, and `.env.example` in Git. `.gitignore` excludes real environment files, private keys, database dumps, uploads, `target/`, logs, cookies, authentication payloads, and API debug responses. `.dockerignore` restricts the image build context to application inputs.

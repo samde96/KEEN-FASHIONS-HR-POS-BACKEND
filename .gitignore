@@ -71,3 +71,6 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+# Device transaction backups contain business data
+keen-device-backup-*.json
+*.offline-backup.json

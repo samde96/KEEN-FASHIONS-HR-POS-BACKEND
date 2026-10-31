@@ -90,6 +90,10 @@ public class StockOperationService {
 
   @Transactional
   public Operation complete(AuthenticatedUser user, UUID id) {
+    return complete(user, id, null);
+  }
+
+  private Operation complete(AuthenticatedUser user, UUID id, Instant occurredAt) {
     Operation operation = require(user, id);
     if (operation.status().equals("COMPLETED")) return operation;
     if (!operation.status().equals("DRAFT"))
@@ -106,11 +110,49 @@ public class StockOperationService {
     for (StockIntakeRequest line :
         request.lines().stream()
             .sorted(java.util.Comparator.comparing(StockIntakeRequest::productId))
-            .toList()) inventory.addStock(user, line);
+            .toList()) inventory.addStock(user, line, id, occurredAt);
     jdbc.update(
-        "update stock_operations set status='COMPLETED',completed_at=now(),updated_at=now(),version=version+1 where id=?",
+        "update stock_operations set status='COMPLETED',completed_at=?,updated_at=now(),version=version+1 where id=?",
+        java.sql.Timestamp.from(occurredAt == null ? Instant.now() : occurredAt),
         id);
     return require(user, id);
+  }
+
+  @Transactional
+  public Operation completeDevice(
+      AuthenticatedUser user, UUID id, DraftRequest request, Instant occurredAt) {
+    jdbc.update(
+        "insert into stock_operations(id,organization_id,user_id,branch_id,payload) values (?,?,?,?,?) on conflict(id) do nothing",
+        id,
+        user.organizationId(),
+        user.userId(),
+        request.branchId(),
+        encode(request));
+    Operation previous = require(user, id);
+    boolean samePayload =
+        jsonEqual(previous.payload().path("form"), request.form())
+            && jsonEqual(previous.payload().path("lines"), json.valueToTree(request.lines()));
+    if (previous.status().equals("COMPLETED")) {
+      if (!samePayload)
+        throw new IllegalArgumentException(
+            "This receipt ID was already completed with different stock lines");
+      return previous;
+    }
+    if (!previous.status().equals("DRAFT"))
+      throw new IllegalArgumentException("This stock draft was discarded");
+    if (previous.version() != request.version() && !samePayload)
+      throw new IllegalArgumentException(
+          "This stock draft changed on another device. Review it before synchronizing");
+    save(
+        user,
+        id,
+        new DraftRequest(
+            request.branchId(),
+            request.form(),
+            request.lines(),
+            previous.version(),
+            request.displayLines()));
+    return complete(user, id, occurredAt);
   }
 
   @Transactional
@@ -160,5 +202,14 @@ public class StockOperationService {
     } catch (Exception e) {
       throw new IllegalArgumentException("Invalid stock draft", e);
     }
+  }
+
+  private static boolean jsonEqual(JsonNode a, JsonNode b) {
+    return a.equals(
+        (left, right) ->
+            left.isNumber() && right.isNumber()
+                ? left.decimalValue().compareTo(right.decimalValue())
+                : left.equals(right) ? 0 : 1,
+        b);
   }
 }

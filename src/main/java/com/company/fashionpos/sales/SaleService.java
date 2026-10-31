@@ -113,6 +113,54 @@ public class SaleService {
 
   private SaleResponse createNewSale(
       AuthenticatedUser user, String idempotencyKey, SaleRequest request) {
+    return createNewSale(user, idempotencyKey, request, null, null, false);
+  }
+
+  public record DevicePrice(
+      @jakarta.validation.constraints.NotNull UUID productId,
+      @jakarta.validation.constraints.NotNull
+          @jakarta.validation.constraints.DecimalMin("0.00")
+          @jakarta.validation.constraints.DecimalMax("999999999.99")
+          BigDecimal unitPrice,
+      @jakarta.validation.constraints.NotNull VatCategory vatCategory) {}
+
+  public record DeviceSale(
+      @jakarta.validation.Valid @jakarta.validation.constraints.NotNull SaleRequest sale,
+      @jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(max = 120)
+          String checkoutKey,
+      @jakarta.validation.constraints.NotEmpty @jakarta.validation.constraints.Size(max = 200)
+          List<@jakarta.validation.Valid DevicePrice> prices,
+      boolean manualMpesa) {}
+
+  /** Captured prices and the original sale time are retained in the device audit receipt. */
+  @Transactional
+  public SaleResponse createDeviceSale(
+      AuthenticatedUser user, String key, DeviceSale device, Instant occurredAt) {
+    key = normalizeIdempotencyKey(device.checkoutKey());
+    cashierShifts.lockOperator(user);
+    var previous =
+        saleRepository.findByIdempotencyKeyWithinOrganization(user.organizationId(), key);
+    if (previous.isPresent())
+      throw new IllegalArgumentException(
+          "This checkout was already completed. Recover its existing receipt instead of creating another device operation");
+    Map<UUID, DevicePrice> prices = new LinkedHashMap<>();
+    for (var price : device.prices()) {
+      if (prices.put(price.productId(), price) != null)
+        throw new IllegalArgumentException("Duplicate captured product price");
+    }
+    if (!prices.keySet().equals(requestedQuantities(device.sale().lines()).keySet()))
+      throw new IllegalArgumentException(
+          "Every sale line needs its captured price and VAT category");
+    return createNewSale(user, key, device.sale(), prices, occurredAt, device.manualMpesa());
+  }
+
+  private SaleResponse createNewSale(
+      AuthenticatedUser user,
+      String idempotencyKey,
+      SaleRequest request,
+      Map<UUID, DevicePrice> capturedPrices,
+      Instant occurredAt,
+      boolean manualMpesa) {
     branchService.requireBranchAccess(user, request.branchId());
     Branch branch = requireBranch(user, request.branchId());
     Map<UUID, Integer> requestedQuantities = requestedQuantities(request.lines());
@@ -133,7 +181,11 @@ public class SaleService {
       inventoryItem.removeStock(quantity);
       inventoryRepository.save(inventoryItem);
 
-      BigDecimal unitPrice = money(product.getUnitPrice());
+      BigDecimal unitPrice =
+          money(
+              capturedPrices == null
+                  ? product.getUnitPrice()
+                  : capturedPrices.get(product.getId()).unitPrice());
       BigDecimal lineTotal = money(unitPrice.multiply(BigDecimal.valueOf(quantity)));
       subtotal = subtotal.add(lineTotal);
       productsToSell.put(product, quantity);
@@ -147,7 +199,9 @@ public class SaleService {
     }
     BigDecimal netAmount = money(subtotal.subtract(discount));
     Map<ProductItem, BigDecimal> lineTaxes =
-        lineTaxes(productsToSell, lineTotals, subtotal, discount);
+        capturedPrices == null
+            ? lineTaxes(productsToSell, lineTotals, subtotal, discount)
+            : capturedTaxes(productsToSell, lineTotals, subtotal, discount, capturedPrices);
     BigDecimal tax = money(lineTaxes.values().stream().reduce(BigDecimal.ZERO, BigDecimal::add));
     BigDecimal total = money(netAmount.add(tax));
     List<NormalizedPayment> payments = payments(request, total);
@@ -167,8 +221,10 @@ public class SaleService {
                 total));
 
     sale.setCashierId(user.userId());
+    if (occurredAt != null) sale.setSoldAt(occurredAt);
     saleRepository.flush();
-    mpesa.consume(user, idempotencyKey, request, sale.getId());
+    if (manualMpesa) mpesa.requireManualCheckout(user, idempotencyKey, request);
+    else mpesa.consume(user, idempotencyKey, request, sale.getId());
     for (Map.Entry<ProductItem, Integer> line : productsToSell.entrySet()) {
       ProductItem product = line.getKey();
       saleLineRepository.save(
@@ -178,11 +234,19 @@ public class SaleService {
               sale,
               product,
               line.getValue(),
-              money(product.getUnitPrice()),
+              money(
+                  capturedPrices == null
+                      ? product.getUnitPrice()
+                      : capturedPrices.get(product.getId()).unitPrice()),
               money(product.getCostPrice()),
               lineTotals.get(product),
-              vatCategoryOrStandard(product.getVatCategory()),
-              vatCategoryOrStandard(product.getVatCategory()).rate(),
+              capturedPrices == null
+                  ? vatCategoryOrStandard(product.getVatCategory())
+                  : capturedPrices.get(product.getId()).vatCategory(),
+              (capturedPrices == null
+                      ? vatCategoryOrStandard(product.getVatCategory())
+                      : capturedPrices.get(product.getId()).vatCategory())
+                  .rate(),
               lineTaxes.get(product)));
     }
 
@@ -442,6 +506,24 @@ public class SaleService {
       return BigDecimal.ZERO;
     }
     return discount.multiply(lineTotal).divide(subtotal, 6, RoundingMode.HALF_UP);
+  }
+
+  private static Map<ProductItem, BigDecimal> capturedTaxes(
+      Map<ProductItem, Integer> products,
+      Map<ProductItem, BigDecimal> totals,
+      BigDecimal subtotal,
+      BigDecimal discount,
+      Map<UUID, DevicePrice> prices) {
+    Map<ProductItem, BigDecimal> taxes = new LinkedHashMap<>();
+    for (var product : products.keySet()) {
+      BigDecimal base =
+          money(
+              totals
+                  .get(product)
+                  .subtract(proportionalDiscount(totals.get(product), subtotal, discount)));
+      taxes.put(product, money(base.multiply(prices.get(product.getId()).vatCategory().rate())));
+    }
+    return taxes;
   }
 
   private static VatCategory vatCategoryOrStandard(VatCategory vatCategory) {
