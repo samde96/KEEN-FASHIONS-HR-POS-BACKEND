@@ -21,6 +21,10 @@ spring:
       - optional:file:.env[.properties]
   application:
     name: keen-fashion-pos
+  task:
+    scheduling:
+      pool:
+        size: 2
   servlet:
     multipart:
       max-file-size: 10MB
@@ -59,6 +63,25 @@ springdoc:
     path: /docs
 
 app:
+  mpesa:
+    enabled: ${MPESA_ENABLED:false}
+    environment: ${MPESA_ENVIRONMENT:sandbox}
+    organization-id: ${MPESA_ORGANIZATION_ID:}
+    consumer-key: ${MPESA_CONSUMER_KEY:}
+    consumer-secret: ${MPESA_CONSUMER_SECRET:}
+    passkey: ${MPESA_PASSKEY:}
+    shortcode: ${MPESA_SHORTCODE:}
+    party-b: ${MPESA_PARTY_B:}
+    transaction-type: ${MPESA_TRANSACTION_TYPE:CustomerPayBillOnline}
+    callback-base-url: ${MPESA_CALLBACK_BASE_URL:}
+    callback-secret: ${MPESA_CALLBACK_SECRET_KEY:}
+    encryption-key: ${MPESA_ENCRYPTION_KEY:}
+    callback-allowed-ips: ${MPESA_CALLBACK_ALLOWED_IPS:196.201.214.200,196.201.214.206,196.201.213.114,196.201.214.207,196.201.214.208,196.201.213.44,196.201.212.127,196.201.212.138,196.201.212.129,196.201.212.136,196.201.212.74,196.201.212.69}
+    trusted-proxies: ${MPESA_TRUSTED_PROXIES:}
+    connect-timeout: 3s
+    request-timeout: 8s
+  daily-summary:
+    scheduler-enabled: ${FASHIONPOS_DAILY_SUMMARY_SCHEDULER_ENABLED:true}
   bootstrap:
     organization-name: ${FASHIONPOS_ORGANIZATION_NAME:KEEN Fashions}
     currency-code: ${FASHIONPOS_CURRENCY_CODE:KES}
@@ -78,3 +101,7 @@ app:
         max-failed-attempts: ${FASHIONPOS_LOGIN_MAX_FAILED_ATTEMPTS:5}
         window: ${FASHIONPOS_LOGIN_RATE_LIMIT_WINDOW:15m}
         lockout: ${FASHIONPOS_LOGIN_RATE_LIMIT_LOCKOUT:15m}
+  delivery:
+    resend:
+      api-key: ${RESEND_API_KEY:}
+      from-email: ${RESEND_FROM_EMAIL:}

@@ -68,7 +68,8 @@ public class AccountingController {
 
   @DeleteMapping("/accounts/{accountId}")
   public AccountResponse deactivateAccount(@PathVariable UUID accountId, Principal principal) {
-    return accountingService.deactivateAccount(authenticatedUserService.current(principal), accountId);
+    return accountingService.deactivateAccount(
+        authenticatedUserService.current(principal), accountId);
   }
 
   @GetMapping("/periods")
@@ -148,8 +149,7 @@ public class AccountingController {
   public List<LedgerEntryResponse> ledger(
       @RequestParam(required = false) UUID accountId,
       @RequestParam(required = false) UUID branchId,
-      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
-          LocalDate from,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
       Principal principal) {
     return accountingService.ledger(
@@ -159,8 +159,7 @@ public class AccountingController {
   @GetMapping("/reports/trial-balance")
   public TrialBalanceResponse trialBalance(
       @RequestParam(required = false) UUID branchId,
-      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
-          LocalDate from,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
       Principal principal) {
     return accountingService.trialBalance(
@@ -170,8 +169,7 @@ public class AccountingController {
   @GetMapping("/reports/profit-and-loss")
   public ProfitAndLossResponse profitAndLoss(
       @RequestParam(required = false) UUID branchId,
-      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
-          LocalDate from,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
       Principal principal) {
     return accountingService.profitAndLoss(
@@ -181,8 +179,7 @@ public class AccountingController {
   @GetMapping("/reports/balance-sheet")
   public BalanceSheetResponse balanceSheet(
       @RequestParam(required = false) UUID branchId,
-      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
-          LocalDate asOf,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf,
       Principal principal) {
     return accountingService.balanceSheet(
         authenticatedUserService.current(principal), branchId, asOf);
@@ -191,8 +188,7 @@ public class AccountingController {
   @GetMapping("/reports/cash-flow")
   public CashFlowResponse cashFlow(
       @RequestParam(required = false) UUID branchId,
-      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
-          LocalDate from,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
       Principal principal) {
     return accountingService.cashFlow(

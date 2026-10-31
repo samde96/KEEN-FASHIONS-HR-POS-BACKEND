@@ -3,18 +3,16 @@ package com.company.fashionpos.sales;
 import com.company.fashionpos.branch.Branch;
 import com.company.fashionpos.branch.BranchRepository;
 import com.company.fashionpos.branch.BranchService;
-import com.company.fashionpos.catalog.CatalogStatus;
 import com.company.fashionpos.catalog.ProductItem;
 import com.company.fashionpos.catalog.ProductRepository;
 import com.company.fashionpos.catalog.VatCategory;
-import com.company.fashionpos.hr.Employee;
-import com.company.fashionpos.hr.EmployeeEmploymentStatus;
-import com.company.fashionpos.hr.EmployeeRepository;
 import com.company.fashionpos.inventory.InventoryItem;
 import com.company.fashionpos.inventory.InventoryRepository;
+import com.company.fashionpos.mpesa.MpesaLedger;
 import com.company.fashionpos.organization.Organization;
 import com.company.fashionpos.organization.OrganizationRepository;
 import com.company.fashionpos.shared.security.AuthenticatedUser;
+import com.company.fashionpos.shifts.CashierShiftService;
 import jakarta.persistence.EntityNotFoundException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -44,8 +42,9 @@ public class SaleService {
   private final BranchService branchService;
   private final ProductRepository productRepository;
   private final InventoryRepository inventoryRepository;
-  private final EmployeeRepository employeeRepository;
   private final OrganizationRepository organizationRepository;
+  private final CashierShiftService cashierShifts;
+  private final MpesaLedger mpesa;
 
   public SaleService(
       SaleRepository saleRepository,
@@ -55,8 +54,9 @@ public class SaleService {
       BranchService branchService,
       ProductRepository productRepository,
       InventoryRepository inventoryRepository,
-      EmployeeRepository employeeRepository,
-      OrganizationRepository organizationRepository) {
+      OrganizationRepository organizationRepository,
+      CashierShiftService cashierShifts,
+      MpesaLedger mpesa) {
     this.saleRepository = saleRepository;
     this.saleLineRepository = saleLineRepository;
     this.salePaymentRepository = salePaymentRepository;
@@ -64,8 +64,9 @@ public class SaleService {
     this.branchService = branchService;
     this.productRepository = productRepository;
     this.inventoryRepository = inventoryRepository;
-    this.employeeRepository = employeeRepository;
     this.organizationRepository = organizationRepository;
+    this.cashierShifts = cashierShifts;
+    this.mpesa = mpesa;
   }
 
   @Transactional(readOnly = true)
@@ -79,7 +80,6 @@ public class SaleService {
                 user.organizationId(), period.fromInclusive(), period.toExclusive());
     return sales.stream()
         .filter(sale -> canAccessBranch(user, sale.getBranch().getId()))
-        .filter(sale -> canViewSale(user, sale))
         .map(sale -> toSaleResponse(user, sale))
         .toList();
   }
@@ -90,7 +90,7 @@ public class SaleService {
         saleRepository
             .findWithinOrganization(saleId, user.organizationId())
             .orElseThrow(() -> new EntityNotFoundException("Sale not found"));
-    if (!canAccessBranch(user, sale.getBranch().getId()) || !canViewSale(user, sale)) {
+    if (!canAccessBranch(user, sale.getBranch().getId())) {
       throw new EntityNotFoundException("Sale not found");
     }
     return toSaleResponse(user, sale);
@@ -100,9 +100,14 @@ public class SaleService {
   public SaleResponse createSale(
       AuthenticatedUser user, String idempotencyKey, SaleRequest request) {
     String normalizedIdempotencyKey = normalizeIdempotencyKey(idempotencyKey);
+    cashierShifts.lockOperator(user);
     return saleRepository
         .findByIdempotencyKeyWithinOrganization(user.organizationId(), normalizedIdempotencyKey)
-        .map(sale -> toSaleResponse(user, sale))
+        .map(
+            sale -> {
+              branchService.requireBranchAccess(user, sale.getBranch().getId());
+              return toSaleResponse(user, sale);
+            })
         .orElseGet(() -> createNewSale(user, normalizedIdempotencyKey, request));
   }
 
@@ -110,7 +115,6 @@ public class SaleService {
       AuthenticatedUser user, String idempotencyKey, SaleRequest request) {
     branchService.requireBranchAccess(user, request.branchId());
     Branch branch = requireBranch(user, request.branchId());
-    Employee soldByEmployee = resolveSoldByEmployee(user, branch, request.soldByEmployeeId());
     Map<UUID, Integer> requestedQuantities = requestedQuantities(request.lines());
     if (requestedQuantities.isEmpty()) {
       throw new IllegalArgumentException("Sale must include at least one product");
@@ -120,7 +124,8 @@ public class SaleService {
     Map<ProductItem, Integer> productsToSell = new LinkedHashMap<>();
     Map<ProductItem, BigDecimal> lineTotals = new LinkedHashMap<>();
 
-    for (Map.Entry<UUID, Integer> requestedLine : requestedQuantities.entrySet()) {
+    for (Map.Entry<UUID, Integer> requestedLine :
+        requestedQuantities.entrySet().stream().sorted(Map.Entry.comparingByKey()).toList()) {
       ProductItem product = requireActiveProduct(user, requestedLine.getKey());
       int quantity = requestedLine.getValue();
       InventoryItem inventoryItem = requireAvailableInventory(user, branch, product, quantity);
@@ -153,7 +158,6 @@ public class SaleService {
                 UUID.randomUUID(),
                 branch.getOrganization(),
                 branch,
-                soldByEmployee,
                 nextSaleNumber(),
                 idempotencyKey,
                 normalizeOptional(request.customerName()),
@@ -162,6 +166,9 @@ public class SaleService {
                 tax,
                 total));
 
+    sale.setCashierId(user.userId());
+    saleRepository.flush();
+    mpesa.consume(user, idempotencyKey, request, sale.getId());
     for (Map.Entry<ProductItem, Integer> line : productsToSell.entrySet()) {
       ProductItem product = line.getKey();
       saleLineRepository.save(
@@ -196,38 +203,54 @@ public class SaleService {
     return toSaleResponse(user, sale);
   }
 
-  private Employee resolveSoldByEmployee(
-      AuthenticatedUser user, Branch branch, UUID requestedEmployeeId) {
-    Employee employee =
-        requestedEmployeeId == null
-            ? employeeRepository
-                .findByUserWithinOrganization(user.organizationId(), user.userId())
-                .orElse(null)
-            : employeeRepository
-                .findWithinOrganization(requestedEmployeeId, user.organizationId())
-                .orElseThrow(() -> new EntityNotFoundException("Sales employee not found"));
-    if (employee == null) {
-      return null;
+  /** Prices and VAT come from the catalog; the browser cannot choose the STK charge. */
+  @Transactional
+  public BigDecimal quoteMpesaAmount(AuthenticatedUser user, SaleRequest request) {
+    branchService.requireBranchAccess(user, request.branchId());
+    Branch branch = requireBranch(user, request.branchId());
+    if (!"KES".equals(branch.getOrganization().getCurrencyCode()))
+      throw new IllegalArgumentException("M-Pesa payments require a KES business");
+    Map<UUID, Integer> quantities = requestedQuantities(request.lines());
+    if (quantities.isEmpty() || quantities.size() > 200)
+      throw new IllegalArgumentException("Select between 1 and 200 sale items");
+    Map<ProductItem, Integer> products = new LinkedHashMap<>();
+    Map<ProductItem, BigDecimal> totals = new LinkedHashMap<>();
+    BigDecimal subtotal = BigDecimal.ZERO;
+    for (var line : quantities.entrySet().stream().sorted(Map.Entry.comparingByKey()).toList()) {
+      ProductItem product = requireActiveProduct(user, line.getKey());
+      requireAvailableInventory(user, branch, product, line.getValue());
+      BigDecimal lineTotal =
+          money(money(product.getUnitPrice()).multiply(BigDecimal.valueOf(line.getValue())));
+      products.put(product, line.getValue());
+      totals.put(product, lineTotal);
+      subtotal = subtotal.add(lineTotal);
     }
-    if (!employee.getPrimaryBranch().getId().equals(branch.getId())) {
-      throw new IllegalArgumentException("Sales employee must belong to the sale branch");
-    }
-    if (!employee.isActive()
-        || employee.getEmploymentStatus() == EmployeeEmploymentStatus.TERMINATED
-        || employee.getEmploymentStatus() == EmployeeEmploymentStatus.RESIGNED
-        || employee.getEmploymentStatus() == EmployeeEmploymentStatus.RETIRED) {
-      throw new IllegalArgumentException("Sales employee must be active");
-    }
-    return employee;
+    subtotal = money(subtotal);
+    BigDecimal discount = optionalMoney(request.discountAmount());
+    if (discount.compareTo(subtotal) > 0)
+      throw new IllegalArgumentException("Discount cannot exceed subtotal");
+    BigDecimal tax =
+        lineTaxes(products, totals, subtotal, discount).values().stream()
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+    BigDecimal total = money(subtotal.subtract(discount).add(tax));
+    var tenders = payments(request, total);
+    if (request.payments() == null
+        || tenders.stream().filter(p -> p.method() == PaymentMethod.MPESA).count() != 1)
+      throw new IllegalArgumentException("Use exactly one M-Pesa tender per checkout");
+    return tenders.stream()
+        .filter(p -> p.method() == PaymentMethod.MPESA)
+        .findFirst()
+        .orElseThrow()
+        .amount();
   }
 
   private ProductItem requireActiveProduct(AuthenticatedUser user, UUID productId) {
     ProductItem product =
         productRepository
-            .findWithinOrganization(productId, user.organizationId())
+            .findForMutation(productId, user.organizationId())
             .orElseThrow(() -> new EntityNotFoundException("Product not found"));
-    if (product.getStatus() != CatalogStatus.ACTIVE) {
-      throw new IllegalArgumentException(product.getName() + " is inactive");
+    if (!product.isSellable()) {
+      throw new IllegalArgumentException("Select an active simple product or exact variant");
     }
     return product;
   }
@@ -274,7 +297,7 @@ public class SaleService {
       if (line.productId() == null || line.quantity() <= 0) {
         throw new IllegalArgumentException("Sale line quantities must be greater than zero");
       }
-      requestedQuantities.merge(line.productId(), line.quantity(), Integer::sum);
+      requestedQuantities.merge(line.productId(), line.quantity(), Math::addExact);
     }
     return requestedQuantities;
   }
@@ -372,21 +395,6 @@ public class SaleService {
 
   private static boolean canAccessBranch(AuthenticatedUser user, UUID branchId) {
     return user.branchIds().isEmpty() || user.branchIds().contains(branchId);
-  }
-
-  private static boolean canViewSale(AuthenticatedUser user, Sale sale) {
-    if (canViewAllCashierSales(user)) {
-      return true;
-    }
-    return sale.getSoldByEmployee() != null
-        && sale.getSoldByEmployee().getUser() != null
-        && sale.getSoldByEmployee().getUser().getId().equals(user.userId());
-  }
-
-  private static boolean canViewAllCashierSales(AuthenticatedUser user) {
-    return user.hasPermission("admin:manage")
-        || user.hasPermission("pos:supervise")
-        || user.hasPermission("reports:view");
   }
 
   private SalePeriod normalizeSalePeriod(

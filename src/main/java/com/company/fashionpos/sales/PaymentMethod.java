@@ -3,5 +3,6 @@ package com.company.fashionpos.sales;
 public enum PaymentMethod {
   MPESA,
   CASH,
-  CARD
+  CARD,
+  BANK_TRANSFER
 }

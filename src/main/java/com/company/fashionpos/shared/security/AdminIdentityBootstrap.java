@@ -71,12 +71,11 @@ class AdminIdentityBootstrap implements ApplicationRunner {
       jdbcTemplate.update(
           """
           update organizations
-          set name = ?, currency_code = ?, time_zone = ?, status = 'ACTIVE', updated_at = now()
+          set name = ?, currency_code = ?, status = 'ACTIVE', updated_at = now()
           where id = ?
           """,
           configuredName,
           configuredCurrency,
-          configuredTimeZone,
           DEFAULT_ORGANIZATION_ID);
       return DEFAULT_ORGANIZATION_ID;
     }

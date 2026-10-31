@@ -34,6 +34,10 @@ public record AuthenticatedUser(
     return roleKeys.contains(ADMIN_ROLE_KEY);
   }
 
+  public boolean isCashier() {
+    return roleKeys.contains("CASHIER") && !isAdmin();
+  }
+
   public boolean canViewProfit() {
     return isAdmin();
   }

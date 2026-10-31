@@ -155,7 +155,11 @@ public final class AccountingDtos {
       List<TrialBalanceRow> rows) {}
 
   public record FinancialStatementRow(
-      UUID accountId, String accountCode, String accountName, String accountType, BigDecimal amount) {}
+      UUID accountId,
+      String accountCode,
+      String accountName,
+      String accountType,
+      BigDecimal amount) {}
 
   public record ProfitAndLossResponse(
       LocalDate fromDate,

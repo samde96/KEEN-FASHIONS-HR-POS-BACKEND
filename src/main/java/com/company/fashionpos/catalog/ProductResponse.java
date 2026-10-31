@@ -2,6 +2,7 @@ package com.company.fashionpos.catalog;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public record ProductResponse(
@@ -20,7 +21,14 @@ public record ProductResponse(
     List<String> sizes,
     List<String> colors,
     CatalogStatus status,
-    int totalStock) {
+    int totalStock,
+    ProductType productType,
+    UUID parentProductId,
+    String parentProductName,
+    String variantName,
+    Map<String, String> variantAttributes,
+    int reorderLevel,
+    boolean sellable) {
 
   public static ProductResponse from(
       ProductItem product, List<String> sizes, List<String> colors, int totalStock) {
@@ -35,7 +43,7 @@ public record ProductResponse(
       boolean includeCostPrice) {
     return new ProductResponse(
         product.getId(),
-        product.getName(),
+        product.getDisplayName(),
         product.getSku(),
         product.getBarcode(),
         product.getCategory().getId(),
@@ -49,6 +57,13 @@ public record ProductResponse(
         sizes,
         colors,
         product.getStatus(),
-        totalStock);
+        totalStock,
+        product.getProductType(),
+        product.getParentProduct() == null ? null : product.getParentProduct().getId(),
+        product.getParentProduct() == null ? null : product.getParentProduct().getName(),
+        product.getParentProduct() == null ? null : product.getName(),
+        product.getVariantAttributes(),
+        product.getDefaultReorderLevel(),
+        product.isSellable());
   }
 }

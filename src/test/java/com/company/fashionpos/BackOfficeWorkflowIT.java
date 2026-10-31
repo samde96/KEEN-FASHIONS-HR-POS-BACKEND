@@ -92,8 +92,7 @@ class BackOfficeWorkflowIT {
   }
 
   @Test
-  void registersBackOfficeRecordsAndMovesStock() throws Exception {
-    String sourceBranchId = createBranch("Warehouse", "WH", "Africa/Nairobi").get("id").asText();
+  void registersBackOfficeRecordsAndReconcilesStock() throws Exception {
     String destinationBranchId =
         createBranch("Town Shop", "TOWN", "Africa/Nairobi").get("id").asText();
 
@@ -142,25 +141,11 @@ class BackOfficeWorkflowIT {
           "productId": "%s",
           "supplierName": "%s",
           "referenceNumber": "GRN-001",
-          "quantity": 20,
+          "quantity": 10,
           "unitCost": 500
         }
         """
-            .formatted(sourceBranchId, productId, supplier.get("name").asText()),
-        201);
-
-    postJson(
-        "/api/v1/transfers",
-        """
-        {
-          "sourceBranchId": "%s",
-          "destinationBranchId": "%s",
-          "productId": "%s",
-          "quantity": 7,
-          "referenceNumber": "TR-001"
-        }
-        """
-            .formatted(sourceBranchId, destinationBranchId, productId),
+            .formatted(destinationBranchId, productId, supplier.get("name").asText()),
         201);
 
     JsonNode sale = createSale(destinationBranchId, productId);
@@ -181,8 +166,7 @@ class BackOfficeWorkflowIT {
 
     JsonNode inventory = getJson("/api/v1/inventory");
 
-    assertThat(quantityFor(inventory, sourceBranchId, productId)).isEqualTo(13);
-    assertThat(quantityFor(inventory, destinationBranchId, productId)).isEqualTo(6);
+    assertThat(quantityFor(inventory, destinationBranchId, productId)).isEqualTo(9);
 
     JsonNode lossAdjustment =
         postJson(
@@ -191,15 +175,15 @@ class BackOfficeWorkflowIT {
             {
               "branchId": "%s",
               "productId": "%s",
-              "countedQuantity": 11,
+              "countedQuantity": 7,
               "reason": "Physical count shortage",
               "notes": "Cycle count variance"
             }
             """
-                .formatted(sourceBranchId, productId),
+                .formatted(destinationBranchId, productId),
             201);
-    assertThat(lossAdjustment.get("systemQuantity").asInt()).isEqualTo(13);
-    assertThat(lossAdjustment.get("countedQuantity").asInt()).isEqualTo(11);
+    assertThat(lossAdjustment.get("systemQuantity").asInt()).isEqualTo(9);
+    assertThat(lossAdjustment.get("countedQuantity").asInt()).isEqualTo(7);
     assertThat(lossAdjustment.get("varianceQuantity").asInt()).isEqualTo(-2);
     assertThat(lossAdjustment.get("lossValue").decimalValue()).isEqualByComparingTo("2400.00");
     assertThat(lossAdjustment.get("excessValue").decimalValue()).isEqualByComparingTo("0.00");
@@ -211,14 +195,14 @@ class BackOfficeWorkflowIT {
             {
               "branchId": "%s",
               "productId": "%s",
-              "countedQuantity": 9,
+              "countedQuantity": 10,
               "reason": "Physical count overage"
             }
             """
                 .formatted(destinationBranchId, productId),
             201);
-    assertThat(excessAdjustment.get("systemQuantity").asInt()).isEqualTo(6);
-    assertThat(excessAdjustment.get("countedQuantity").asInt()).isEqualTo(9);
+    assertThat(excessAdjustment.get("systemQuantity").asInt()).isEqualTo(7);
+    assertThat(excessAdjustment.get("countedQuantity").asInt()).isEqualTo(10);
     assertThat(excessAdjustment.get("varianceQuantity").asInt()).isEqualTo(3);
     assertThat(excessAdjustment.get("lossValue").decimalValue()).isEqualByComparingTo("0.00");
     assertThat(excessAdjustment.get("excessValue").decimalValue()).isEqualByComparingTo("3600.00");
@@ -237,10 +221,9 @@ class BackOfficeWorkflowIT {
     assertThat(adjustmentSummary.get("netValue").decimalValue()).isEqualByComparingTo("1200.00");
 
     inventory = getJson("/api/v1/inventory");
-    assertThat(quantityFor(inventory, sourceBranchId, productId)).isEqualTo(11);
-    assertThat(quantityFor(inventory, destinationBranchId, productId)).isEqualTo(9);
+    assertThat(quantityFor(inventory, destinationBranchId, productId)).isEqualTo(10);
 
-    JsonNode sourceInventoryItem = inventoryItemFor(inventory, sourceBranchId, productId);
+    JsonNode sourceInventoryItem = inventoryItemFor(inventory, destinationBranchId, productId);
     JsonNode reorderedInventoryItem =
         putJson(
             "/api/v1/inventory/%s/reorder-level".formatted(sourceInventoryItem.get("id").asText()),

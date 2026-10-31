@@ -38,10 +38,12 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 @Configuration
 @EnableMethodSecurity
-@EnableConfigurationProperties(LoginRateLimitProperties.class)
+@EnableConfigurationProperties({
+  LoginRateLimitProperties.class,
+  com.company.fashionpos.mpesa.MpesaProperties.class
+})
 public class SecurityConfig {
 
-  private static final String ADMIN_ROLE = "ROLE_ADMIN";
   private static final String ADMIN_MANAGE = "admin:manage";
   private static final String ACCOUNTING_MANAGE = "accounting:manage";
   private static final String ACCOUNTING_VIEW = "accounting:view";
@@ -50,14 +52,11 @@ public class SecurityConfig {
   private static final String AUDIT_VIEW = "audit:view";
   private static final String COMMERCIAL_MANAGE = "commercial:manage";
   private static final String CRM_MANAGE = "crm:manage";
-  private static final String ETIMS_MANAGE = "etims:manage";
   private static final String NOTIFICATIONS_VIEW = "notifications:view";
   private static final String POS_SELL = "pos:sell";
   private static final String PROCUREMENT_MANAGE = "procurement:manage";
   private static final String REPORTS_VIEW = "reports:view";
   private static final String SALES_VIEW = "sales:view";
-  private static final String TRANSFER_CREATE = "transfer:create";
-  private static final String TRANSFER_RECEIVE = "transfer:receive";
 
   @Bean
   SecurityFilterChain securityFilterChain(
@@ -71,6 +70,9 @@ public class SecurityConfig {
     http.csrf(
             csrf ->
                 csrf.csrfTokenRepository(csrfTokenRepository)
+                    .ignoringRequestMatchers(
+                        new org.springframework.security.web.util.matcher.AntPathRequestMatcher(
+                            "/api/v1/mpesa/callback/**", "POST"))
                     .csrfTokenRequestHandler(csrfTokenRequestHandler))
         .cors(Customizer.withDefaults())
         .sessionManagement(
@@ -91,6 +93,10 @@ public class SecurityConfig {
                     .permitAll()
                     .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout")
                     .permitAll()
+                    .requestMatchers(HttpMethod.POST, "/api/v1/mpesa/callback/**")
+                    .permitAll()
+                    .requestMatchers("/api/v1/mpesa/**")
+                    .hasAnyAuthority(ADMIN_MANAGE, POS_SELL)
                     .requestMatchers(
                         HttpMethod.GET,
                         "/api/v1/me",
@@ -102,8 +108,18 @@ public class SecurityConfig {
                     .authenticated()
                     .requestMatchers(HttpMethod.PUT, "/api/v1/organization/current/vat-settings")
                     .hasAuthority(ADMIN_MANAGE)
-                    .requestMatchers("/api/v1/hr/**")
-                    .hasAuthority(ADMIN_ROLE)
+                    .requestMatchers(HttpMethod.PUT, "/api/v1/pos-preferences")
+                    .hasAuthority(ADMIN_MANAGE)
+                    .requestMatchers(HttpMethod.GET, "/api/v1/daily-sales-reports/**")
+                    .hasAnyAuthority(ADMIN_MANAGE, REPORTS_VIEW)
+                    .requestMatchers(HttpMethod.GET, "/api/v1/sale-reversals")
+                    .hasAnyAuthority(ADMIN_MANAGE, REPORTS_VIEW, SALES_VIEW)
+                    .requestMatchers("/api/v1/daily-sales-reports/**")
+                    .hasAuthority(ADMIN_MANAGE)
+                    .requestMatchers(HttpMethod.POST, "/api/v1/sales/*/reversal")
+                    .hasAuthority(ADMIN_MANAGE)
+                    .requestMatchers("/api/v1/stock-operations/**")
+                    .hasAnyAuthority(ADMIN_MANAGE, INVENTORY_RECEIVE)
                     .requestMatchers(
                         HttpMethod.GET, "/api/v1/roles", "/api/v1/permissions", "/api/v1/users")
                     .hasAuthority(ADMIN_MANAGE)
@@ -111,6 +127,10 @@ public class SecurityConfig {
                     .hasAnyAuthority(ADMIN_MANAGE, PROCUREMENT_MANAGE, REPORTS_VIEW)
                     .requestMatchers(HttpMethod.GET, "/api/v1/customers/**")
                     .hasAnyAuthority(ADMIN_MANAGE, COMMERCIAL_MANAGE, CRM_MANAGE, SALES_VIEW)
+                    .requestMatchers("/api/v1/customers/**")
+                    .hasAnyAuthority(ADMIN_MANAGE, COMMERCIAL_MANAGE, CRM_MANAGE)
+                    .requestMatchers(HttpMethod.POST, "/api/v1/document-delivery/email")
+                    .hasAnyAuthority(ADMIN_MANAGE, COMMERCIAL_MANAGE, PROCUREMENT_MANAGE)
                     .requestMatchers(HttpMethod.GET, "/api/v1/crm/**")
                     .hasAnyAuthority(ADMIN_MANAGE, CRM_MANAGE, SALES_VIEW, REPORTS_VIEW)
                     .requestMatchers(HttpMethod.GET, "/api/v1/commercial/**")
@@ -119,8 +139,6 @@ public class SecurityConfig {
                     .hasAnyAuthority(ADMIN_MANAGE, ACCOUNTING_VIEW, ACCOUNTING_MANAGE, REPORTS_VIEW)
                     .requestMatchers("/api/v1/accounting/**")
                     .hasAnyAuthority(ADMIN_MANAGE, ACCOUNTING_MANAGE)
-                    .requestMatchers(HttpMethod.GET, "/api/v1/etims/**")
-                    .hasAnyAuthority(ADMIN_MANAGE, ETIMS_MANAGE, REPORTS_VIEW)
                     .requestMatchers(HttpMethod.GET, "/api/v1/notifications/**")
                     .hasAnyAuthority(ADMIN_MANAGE, NOTIFICATIONS_VIEW)
                     .requestMatchers(HttpMethod.GET, "/api/v1/audit-events")
@@ -158,14 +176,16 @@ public class SecurityConfig {
                     .hasAnyAuthority(ADMIN_MANAGE, INVENTORY_ADJUST, REPORTS_VIEW)
                     .requestMatchers(HttpMethod.POST, "/api/v1/stock-adjustments")
                     .hasAnyAuthority(ADMIN_MANAGE, INVENTORY_ADJUST)
-                    .requestMatchers(HttpMethod.GET, "/api/v1/transfers")
-                    .hasAnyAuthority(ADMIN_MANAGE, TRANSFER_CREATE, TRANSFER_RECEIVE, REPORTS_VIEW)
-                    .requestMatchers(HttpMethod.POST, "/api/v1/transfers")
-                    .hasAnyAuthority(ADMIN_MANAGE, TRANSFER_CREATE)
                     .requestMatchers(HttpMethod.GET, "/api/v1/sales/**")
                     .hasAnyAuthority(ADMIN_MANAGE, SALES_VIEW, REPORTS_VIEW)
                     .requestMatchers(HttpMethod.POST, "/api/v1/sales")
                     .hasAnyAuthority(ADMIN_MANAGE, POS_SELL)
+                    .requestMatchers("/api/v1/shifts", "/api/v1/shifts/**")
+                    .hasAnyAuthority(ADMIN_MANAGE, "shifts:manage")
+                    .requestMatchers(HttpMethod.GET, "/api/v1/expenses")
+                    .hasAnyAuthority(ADMIN_MANAGE, REPORTS_VIEW, SALES_VIEW, "expenses:create")
+                    .requestMatchers(HttpMethod.POST, "/api/v1/expenses")
+                    .hasAnyAuthority(ADMIN_MANAGE, REPORTS_VIEW, SALES_VIEW, "expenses:create")
                     .requestMatchers("/api/v1/expenses/**")
                     .hasAnyAuthority(ADMIN_MANAGE, REPORTS_VIEW, SALES_VIEW)
                     .anyRequest()

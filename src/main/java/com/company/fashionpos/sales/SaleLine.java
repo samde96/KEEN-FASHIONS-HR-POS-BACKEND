@@ -1,9 +1,11 @@
 package com.company.fashionpos.sales;
 
 import com.company.fashionpos.catalog.ProductItem;
+import com.company.fashionpos.catalog.VariantAttributesConverter;
 import com.company.fashionpos.catalog.VatCategory;
 import com.company.fashionpos.organization.Organization;
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -15,11 +17,34 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 
 @Entity
 @Table(name = "sale_lines")
 public class SaleLine {
+
+  @Column(name = "parent_product_id")
+  private UUID parentProductId;
+
+  @Column(name = "parent_product_name", length = 180)
+  private String parentProductName;
+
+  @Convert(converter = VariantAttributesConverter.class)
+  @Column(name = "variant_attributes", columnDefinition = "TEXT", nullable = false)
+  private Map<String, String> variantAttributes = Map.of();
+
+  public UUID getParentProductId() {
+    return parentProductId;
+  }
+
+  public String getParentProductName() {
+    return parentProductName;
+  }
+
+  public Map<String, String> getVariantAttributes() {
+    return variantAttributes;
+  }
 
   @Id private UUID id;
 
@@ -35,7 +60,7 @@ public class SaleLine {
   @JoinColumn(name = "product_id", nullable = false)
   private ProductItem product;
 
-  @Column(name = "product_name", nullable = false, length = 180)
+  @Column(name = "product_name", nullable = false, columnDefinition = "TEXT")
   private String productName;
 
   @Column(nullable = false, length = 80)
@@ -87,7 +112,12 @@ public class SaleLine {
     this.organization = organization;
     this.sale = sale;
     this.product = product;
-    this.productName = product.getName();
+    this.productName = product.getDisplayName();
+    this.parentProductId =
+        product.getParentProduct() == null ? null : product.getParentProduct().getId();
+    this.parentProductName =
+        product.getParentProduct() == null ? null : product.getParentProduct().getName();
+    this.variantAttributes = product.getVariantAttributes();
     this.sku = product.getSku();
     this.categoryName = product.getCategory().getName();
     this.quantity = quantity;

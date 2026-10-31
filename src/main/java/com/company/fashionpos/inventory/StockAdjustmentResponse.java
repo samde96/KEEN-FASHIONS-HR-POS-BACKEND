@@ -27,7 +27,7 @@ public record StockAdjustmentResponse(
         adjustment.getBranch().getId(),
         adjustment.getBranch().getName(),
         adjustment.getProduct().getId(),
-        adjustment.getProduct().getName(),
+        adjustment.getProduct().getDisplayName(),
         adjustment.getProduct().getSku(),
         adjustment.getSystemQuantity(),
         adjustment.getCountedQuantity(),

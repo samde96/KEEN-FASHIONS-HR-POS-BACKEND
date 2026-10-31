@@ -2,6 +2,7 @@ package com.company.fashionpos.sales;
 
 import com.company.fashionpos.catalog.VatCategory;
 import java.math.BigDecimal;
+import java.util.Map;
 import java.util.UUID;
 
 public record SaleLineResponse(
@@ -15,7 +16,10 @@ public record SaleLineResponse(
     BigDecimal lineTotal,
     VatCategory vatCategory,
     BigDecimal taxRate,
-    BigDecimal taxAmount) {
+    BigDecimal taxAmount,
+    UUID parentProductId,
+    String parentProductName,
+    Map<String, String> variantAttributes) {
 
   public static SaleLineResponse from(SaleLine line) {
     return from(line, true);
@@ -33,6 +37,9 @@ public record SaleLineResponse(
         line.getLineTotal(),
         line.getVatCategory(),
         line.getTaxRate(),
-        line.getTaxAmount());
+        line.getTaxAmount(),
+        line.getParentProductId(),
+        line.getParentProductName(),
+        line.getVariantAttributes());
   }
 }

@@ -1,0 +1,45 @@
+# Deploy this file when the backend/ folder is its own GitHub repository.
+# Plans below are for evaluation; see README.md before production use.
+services:
+  - type: web
+    name: keen-fashion-pos-backend
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: keen-fashion-pos-db
+          property: connectionString
+      - key: FASHIONPOS_ADMIN_EMAIL
+        sync: false
+      - key: FASHIONPOS_ADMIN_PASSWORD
+        sync: false
+      - key: FASHIONPOS_ADMIN_DISPLAY_NAME
+        value: System Admin
+      - key: FASHIONPOS_ORGANIZATION_NAME
+        value: KEEN Fashions
+      - key: FASHIONPOS_CURRENCY_CODE
+        value: KES
+      - key: FASHIONPOS_TIME_ZONE
+        value: Africa/Nairobi
+      - key: FASHIONPOS_CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: FASHIONPOS_SESSION_COOKIE_SECURE
+        value: "true"
+      - key: FASHIONPOS_SESSION_COOKIE_SAME_SITE
+        value: "None"
+      - key: FASHIONPOS_LOGIN_RATE_LIMIT_ENABLED
+        value: "true"
+
+databases:
+  - name: keen-fashion-pos-db
+    plan: free
+    region: frankfurt
+    databaseName: fashion_pos
+    user: fashion_pos_app
+    postgresMajorVersion: "16"
+    ipAllowList: []

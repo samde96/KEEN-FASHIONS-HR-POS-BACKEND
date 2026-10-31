@@ -15,8 +15,6 @@ public interface SaleRepository extends JpaRepository<Sale, UUID> {
             select sale
             from Sale sale
               join fetch sale.branch
-              left join fetch sale.soldByEmployee soldByEmployee
-              left join fetch soldByEmployee.user
             where sale.organization.id = :organizationId
             order by sale.soldAt desc
             """)
@@ -27,8 +25,6 @@ public interface SaleRepository extends JpaRepository<Sale, UUID> {
             select sale
             from Sale sale
               join fetch sale.branch
-              left join fetch sale.soldByEmployee soldByEmployee
-              left join fetch soldByEmployee.user
             where sale.organization.id = :organizationId
               and sale.soldAt >= :fromInclusive
               and sale.soldAt < :toExclusive
@@ -44,8 +40,6 @@ public interface SaleRepository extends JpaRepository<Sale, UUID> {
             select sale
             from Sale sale
               join fetch sale.branch
-              left join fetch sale.soldByEmployee soldByEmployee
-              left join fetch soldByEmployee.user
             where sale.id = :saleId
               and sale.organization.id = :organizationId
             """)
@@ -57,30 +51,9 @@ public interface SaleRepository extends JpaRepository<Sale, UUID> {
             select sale
             from Sale sale
               join fetch sale.branch
-              left join fetch sale.soldByEmployee soldByEmployee
-              left join fetch soldByEmployee.user
             where sale.organization.id = :organizationId
               and sale.idempotencyKey = :idempotencyKey
             """)
   Optional<Sale> findByIdempotencyKeyWithinOrganization(
       @Param("organizationId") UUID organizationId, @Param("idempotencyKey") String idempotencyKey);
-
-  @Query(
-      """
-            select sale
-            from Sale sale
-              join fetch sale.branch
-              join fetch sale.soldByEmployee soldByEmployee
-              join fetch soldByEmployee.primaryBranch
-              left join fetch soldByEmployee.department
-              left join fetch soldByEmployee.jobTitle
-            where sale.organization.id = :organizationId
-              and sale.soldAt >= :fromInclusive
-              and sale.soldAt < :toExclusive
-            order by sale.soldAt desc
-            """)
-  List<Sale> findAttributedSalesWithinPeriod(
-      @Param("organizationId") UUID organizationId,
-      @Param("fromInclusive") Instant fromInclusive,
-      @Param("toExclusive") Instant toExclusive);
 }

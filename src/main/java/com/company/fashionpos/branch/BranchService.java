@@ -28,6 +28,7 @@ public class BranchService {
   @Transactional(readOnly = true)
   public List<BranchResponse> listAuthorizedBranches(AuthenticatedUser user) {
     return branchRepository.findWithinOrganization(user.organizationId()).stream()
+        .filter(branch -> !user.isCashier() || user.branchIds().contains(branch.getId()))
         .map(BranchResponse::from)
         .toList();
   }
@@ -93,6 +94,7 @@ public class BranchService {
         branchRepository.existsWithinOrganization(branchId, user.organizationId());
     boolean userHasExplicitBranchScope = !user.branchIds().isEmpty();
     if (!branchIsInOrganization
+        || (user.isCashier() && user.branchIds().isEmpty())
         || (userHasExplicitBranchScope && !user.branchIds().contains(branchId))) {
       throw new AccessDeniedException("Branch is outside the authenticated user's scope");
     }

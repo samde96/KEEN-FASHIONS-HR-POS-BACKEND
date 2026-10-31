@@ -2,6 +2,7 @@ package com.company.fashionpos.catalog;
 
 import com.company.fashionpos.organization.Organization;
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -15,11 +16,67 @@ import jakarta.persistence.Table;
 import jakarta.persistence.Version;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 
 @Entity
 @Table(name = "products")
 public class ProductItem {
+
+  @Enumerated(EnumType.STRING)
+  @Column(name = "product_type", nullable = false, length = 24)
+  private ProductType productType = ProductType.SIMPLE;
+
+  @ManyToOne(fetch = FetchType.LAZY)
+  @JoinColumn(name = "parent_product_id")
+  private ProductItem parentProduct;
+
+  @Convert(converter = VariantAttributesConverter.class)
+  @Column(name = "variant_attributes", columnDefinition = "TEXT", nullable = false)
+  private Map<String, String> variantAttributes = Map.of();
+
+  @Column(name = "default_reorder_level", nullable = false)
+  private int defaultReorderLevel;
+
+  public ProductType getProductType() {
+    return productType;
+  }
+
+  public ProductItem getParentProduct() {
+    return parentProduct;
+  }
+
+  public Map<String, String> getVariantAttributes() {
+    return variantAttributes;
+  }
+
+  public int getDefaultReorderLevel() {
+    return defaultReorderLevel;
+  }
+
+  public boolean isSellable() {
+    return productType == ProductType.SIMPLE
+        && status == CatalogStatus.ACTIVE
+        && (parentProduct == null || parentProduct.getStatus() == CatalogStatus.ACTIVE);
+  }
+
+  public String getDisplayName() {
+    if (parentProduct == null) return name;
+    String details =
+        variantAttributes.entrySet().stream()
+            .sorted(Map.Entry.comparingByKey())
+            .map(entry -> entry.getKey() + ": " + entry.getValue())
+            .collect(java.util.stream.Collectors.joining(", "));
+    return parentProduct.getName() + " — " + name + (details.isBlank() ? "" : " (" + details + ")");
+  }
+
+  public void configureVariants(
+      ProductType type, ProductItem parent, Map<String, String> attributes, int reorderLevel) {
+    this.productType = type;
+    this.parentProduct = parent;
+    this.variantAttributes = Map.copyOf(attributes);
+    this.defaultReorderLevel = reorderLevel;
+  }
 
   @Id private UUID id;
 

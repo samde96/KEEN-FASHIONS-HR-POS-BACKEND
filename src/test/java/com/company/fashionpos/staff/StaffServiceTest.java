@@ -92,7 +92,7 @@ class StaffServiceTest {
                     authenticatedUser(organizationId),
                     new RoleRequest("Owner", "OWNER", "Legacy owner access", Set.of())))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Owner role is no longer supported");
+        .hasMessage("Only Admin, Shop Manager, and Cashier roles are supported");
   }
 
   private static StaffService service(

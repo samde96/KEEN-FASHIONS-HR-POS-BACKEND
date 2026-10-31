@@ -9,6 +9,11 @@ import org.springframework.data.repository.query.Param;
 
 public interface ProductRepository extends JpaRepository<ProductItem, UUID> {
 
+  @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+  @Query("select p from ProductItem p where p.id=:productId and p.organization.id=:organizationId")
+  Optional<ProductItem> findForMutation(
+      @Param("productId") UUID productId, @Param("organizationId") UUID organizationId);
+
   @Query(
       """
             select product

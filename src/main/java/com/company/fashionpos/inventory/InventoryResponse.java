@@ -34,7 +34,7 @@ public record InventoryResponse(
         item.getBranch().getId(),
         item.getBranch().getName(),
         item.getProduct().getId(),
-        item.getProduct().getName(),
+        item.getProduct().getDisplayName(),
         item.getProduct().getSku(),
         item.getProduct().getCategory().getName(),
         item.getProduct().getVatCategory(),

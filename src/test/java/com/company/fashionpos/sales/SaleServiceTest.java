@@ -13,16 +13,10 @@ import com.company.fashionpos.branch.Branch;
 import com.company.fashionpos.branch.BranchRepository;
 import com.company.fashionpos.branch.BranchService;
 import com.company.fashionpos.catalog.ProductRepository;
-import com.company.fashionpos.hr.Employee;
-import com.company.fashionpos.hr.EmployeeEmploymentStatus;
-import com.company.fashionpos.hr.EmployeeEmploymentType;
-import com.company.fashionpos.hr.EmployeeRepository;
-import com.company.fashionpos.hr.SalaryPaymentMethod;
 import com.company.fashionpos.inventory.InventoryRepository;
 import com.company.fashionpos.organization.Organization;
 import com.company.fashionpos.organization.OrganizationRepository;
 import com.company.fashionpos.shared.security.AuthenticatedUser;
-import com.company.fashionpos.staff.UserAccount;
 import jakarta.persistence.EntityNotFoundException;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -39,13 +33,9 @@ class SaleServiceTest {
   private static final UUID ORGANIZATION_ID =
       UUID.fromString("00000000-0000-4000-8000-000000000001");
   private static final UUID BRANCH_ID = UUID.fromString("00000000-0000-4000-8000-000000000101");
-  private static final UUID CASHIER_USER_ID =
-      UUID.fromString("00000000-0000-4000-8000-000000000201");
-  private static final UUID OTHER_USER_ID = UUID.fromString("00000000-0000-4000-8000-000000000202");
-  private static final UUID CASHIER_EMPLOYEE_ID =
-      UUID.fromString("00000000-0000-4000-8000-000000000301");
-  private static final UUID OTHER_EMPLOYEE_ID =
-      UUID.fromString("00000000-0000-4000-8000-000000000302");
+  private static final UUID OTHER_BRANCH_ID =
+      UUID.fromString("00000000-0000-4000-8000-000000000102");
+  private static final UUID USER_ID = UUID.fromString("00000000-0000-4000-8000-000000000201");
 
   private SaleRepository saleRepository;
   private SaleLineRepository saleLineRepository;
@@ -54,6 +44,7 @@ class SaleServiceTest {
   private SaleService saleService;
   private Organization organization;
   private Branch branch;
+  private Branch otherBranch;
 
   @BeforeEach
   void setUp() {
@@ -70,68 +61,70 @@ class SaleServiceTest {
             mock(BranchService.class),
             mock(ProductRepository.class),
             mock(InventoryRepository.class),
-            mock(EmployeeRepository.class),
-            organizationRepository);
+            organizationRepository,
+            mock(com.company.fashionpos.shifts.CashierShiftService.class),
+            mock(com.company.fashionpos.mpesa.MpesaLedger.class));
 
     organization = new Organization(ORGANIZATION_ID, "KEEN Fashions", "KES", "Africa/Nairobi");
     branch = new Branch(BRANCH_ID, organization, "Town Shop", "TOWN", "Africa/Nairobi");
+    otherBranch =
+        new Branch(OTHER_BRANCH_ID, organization, "Outlet Shop", "OUTLET", "Africa/Nairobi");
     when(organizationRepository.findById(ORGANIZATION_ID)).thenReturn(Optional.of(organization));
     when(saleLineRepository.findForSale(any(UUID.class))).thenReturn(List.of());
     when(salePaymentRepository.findForSale(any(UUID.class))).thenReturn(List.of());
   }
 
   @Test
-  void cashierListIsLimitedToOwnSalesWithinSelectedBusinessDate() {
-    Sale ownSale = sale(CASHIER_EMPLOYEE_ID, employee(CASHIER_EMPLOYEE_ID, CASHIER_USER_ID));
-    Sale otherCashierSale = sale(OTHER_EMPLOYEE_ID, employee(OTHER_EMPLOYEE_ID, OTHER_USER_ID));
-    Sale unassignedSale = sale(UUID.fromString("00000000-0000-4000-8000-000000000303"), null);
+  void listSalesFiltersByAuthorizedBranchWithinSelectedBusinessDate() {
+    Sale accessibleSale = sale(UUID.fromString("00000000-0000-4000-8000-000000000301"), branch);
+    Sale inaccessibleSale =
+        sale(UUID.fromString("00000000-0000-4000-8000-000000000302"), otherBranch);
     when(saleRepository.findWithinOrganizationAndPeriod(
             eq(ORGANIZATION_ID),
             eq(Instant.parse("2026-09-19T21:00:00Z")),
             eq(Instant.parse("2026-09-20T21:00:00Z"))))
-        .thenReturn(List.of(ownSale, otherCashierSale, unassignedSale));
+        .thenReturn(List.of(accessibleSale, inaccessibleSale));
 
     List<SaleResponse> sales =
         saleService.listSales(
-            cashier(), LocalDate.parse("2026-09-20"), LocalDate.parse("2026-09-20"));
+            branchScopedUser(), LocalDate.parse("2026-09-20"), LocalDate.parse("2026-09-20"));
 
-    assertThat(sales).extracting(SaleResponse::id).containsExactly(ownSale.getId());
+    assertThat(sales).extracting(SaleResponse::id).containsExactly(accessibleSale.getId());
     verify(saleRepository, never()).findWithinOrganization(ORGANIZATION_ID);
   }
 
   @Test
-  void administratorCanSeeAllCashierSales() {
-    Sale ownSale = sale(CASHIER_EMPLOYEE_ID, employee(CASHIER_EMPLOYEE_ID, CASHIER_USER_ID));
-    Sale otherCashierSale = sale(OTHER_EMPLOYEE_ID, employee(OTHER_EMPLOYEE_ID, OTHER_USER_ID));
-    Sale unassignedSale = sale(UUID.fromString("00000000-0000-4000-8000-000000000303"), null);
+  void administratorCanSeeAllBranchSales() {
+    Sale firstSale = sale(UUID.fromString("00000000-0000-4000-8000-000000000301"), branch);
+    Sale secondSale = sale(UUID.fromString("00000000-0000-4000-8000-000000000302"), otherBranch);
     when(saleRepository.findWithinOrganization(ORGANIZATION_ID))
-        .thenReturn(List.of(ownSale, otherCashierSale, unassignedSale));
+        .thenReturn(List.of(firstSale, secondSale));
 
     List<SaleResponse> sales = saleService.listSales(administrator(), null, null);
 
     assertThat(sales)
         .extracting(SaleResponse::id)
-        .containsExactly(ownSale.getId(), otherCashierSale.getId(), unassignedSale.getId());
+        .containsExactly(firstSale.getId(), secondSale.getId());
   }
 
   @Test
-  void cashierCannotOpenAnotherCashiersSale() {
-    Sale otherCashierSale = sale(OTHER_EMPLOYEE_ID, employee(OTHER_EMPLOYEE_ID, OTHER_USER_ID));
-    when(saleRepository.findWithinOrganization(otherCashierSale.getId(), ORGANIZATION_ID))
-        .thenReturn(Optional.of(otherCashierSale));
+  void branchScopedUserCannotOpenAnotherBranchesSale() {
+    Sale inaccessibleSale =
+        sale(UUID.fromString("00000000-0000-4000-8000-000000000302"), otherBranch);
+    when(saleRepository.findWithinOrganization(inaccessibleSale.getId(), ORGANIZATION_ID))
+        .thenReturn(Optional.of(inaccessibleSale));
 
-    assertThatThrownBy(() -> saleService.getSale(cashier(), otherCashierSale.getId()))
+    assertThatThrownBy(() -> saleService.getSale(branchScopedUser(), inaccessibleSale.getId()))
         .isInstanceOf(EntityNotFoundException.class)
         .hasMessage("Sale not found");
   }
 
-  private Sale sale(UUID id, Employee employee) {
+  private Sale sale(UUID id, Branch saleBranch) {
     Sale sale =
         new Sale(
             id,
             organization,
-            branch,
-            employee,
+            saleBranch,
             "SALE-" + id.toString().substring(0, 8),
             "idem-" + id,
             null,
@@ -143,59 +136,9 @@ class SaleServiceTest {
     return sale;
   }
 
-  private Employee employee(UUID employeeId, UUID userId) {
-    UserAccount user = new UserAccount(userId, organization, userId + "@test.local", "Cashier");
-    Employee employee =
-        new Employee(
-            employeeId,
-            organization,
-            branch,
-            "EMP-" + employeeId.toString().substring(0, 8),
-            "Cashier",
-            "User",
-            EmployeeEmploymentType.PERMANENT,
-            EmployeeEmploymentStatus.ACTIVE,
-            LocalDate.parse("2026-01-01"));
-    employee.updateDetails(
-        user,
-        branch,
-        null,
-        null,
-        employee.getEmployeeNumber(),
-        employee.getFirstName(),
-        null,
-        employee.getLastName(),
-        null,
-        user.getEmail(),
-        null,
-        null,
-        null,
-        null,
-        EmployeeEmploymentType.PERMANENT,
-        EmployeeEmploymentStatus.ACTIVE,
-        LocalDate.parse("2026-01-01"),
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        BigDecimal.ZERO,
-        SalaryPaymentMethod.UNSPECIFIED,
-        null,
-        null,
-        null,
-        null,
-        true);
-    return employee;
-  }
-
-  private static AuthenticatedUser cashier() {
+  private static AuthenticatedUser branchScopedUser() {
     return new AuthenticatedUser(
-        CASHIER_USER_ID,
+        USER_ID,
         "cashier@test.local",
         "Cashier User",
         ORGANIZATION_ID,

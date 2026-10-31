@@ -64,6 +64,9 @@ public class Expense {
   @Column(name = "incurred_at", nullable = false)
   private Instant incurredAt;
 
+  @Column(name = "created_by")
+  private UUID createdBy;
+
   @Column(name = "created_at", nullable = false)
   private Instant createdAt;
 
@@ -127,6 +130,14 @@ public class Expense {
       throw new IllegalArgumentException("Voided expenses cannot be marked paid");
     }
     status = ExpenseStatus.PAID;
+  }
+
+  public void recordCreator(UUID userId) {
+    this.createdBy = userId;
+  }
+
+  public UUID getCreatedBy() {
+    return createdBy;
   }
 
   public void voidExpense() {

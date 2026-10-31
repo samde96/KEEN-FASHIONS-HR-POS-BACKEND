@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -122,6 +123,7 @@ public class CatalogService {
             requireNonNegative(request.unitPrice(), "Unit price"));
     updateProductDetails(
         product, category, sku, barcode, request, organization.getDefaultProductVatCategory());
+    configureVariants(user, product, request);
     return toProductResponse(productRepository.save(product), user.canViewProfit());
   }
 
@@ -130,7 +132,7 @@ public class CatalogService {
       AuthenticatedUser user, UUID productId, ProductRequest request) {
     ProductItem product =
         productRepository
-            .findWithinOrganization(productId, user.organizationId())
+            .findForMutation(productId, user.organizationId())
             .orElseThrow(() -> new EntityNotFoundException("Product not found"));
 
     String sku = normalizeSku(request.sku());
@@ -150,6 +152,7 @@ public class CatalogService {
 
     ProductCategory category = requireCategory(user, request.categoryId());
     updateProductDetails(product, category, sku, barcode, request, product.getVatCategory());
+    configureVariants(user, product, request);
     return toProductResponse(product, user.canViewProfit());
   }
 
@@ -157,7 +160,7 @@ public class CatalogService {
   public void deactivateProduct(AuthenticatedUser user, UUID productId) {
     ProductItem product =
         productRepository
-            .findWithinOrganization(productId, user.organizationId())
+            .findForMutation(productId, user.organizationId())
             .orElseThrow(() -> new EntityNotFoundException("Product not found"));
     product.deactivate();
   }
@@ -203,10 +206,64 @@ public class CatalogService {
   private int totalStock(ProductItem product) {
     Number total =
         jdbcTemplate.queryForObject(
-            "select coalesce(sum(quantity_on_hand), 0) from inventory_items where product_id = ?",
+            "select coalesce(sum(i.quantity_on_hand), 0) from inventory_items i join products p on p.id=i.product_id where p.id = ? or p.parent_product_id = ?",
             Number.class,
+            product.getId(),
             product.getId());
     return total == null ? 0 : total.intValue();
+  }
+
+  private void configureVariants(
+      AuthenticatedUser user, ProductItem product, ProductRequest request) {
+    ProductType type =
+        request.productType() == null ? product.getProductType() : request.productType();
+    UUID parentId = request.parentProductId();
+    ProductItem parent =
+        parentId == null
+            ? product.getParentProduct()
+            : productRepository
+                .findForMutation(parentId, user.organizationId())
+                .orElseThrow(() -> new EntityNotFoundException("Parent product not found"));
+    if (parent != null
+        && (parent.getId().equals(product.getId())
+            || parent.getProductType() != ProductType.VARIABLE
+            || type != ProductType.SIMPLE)) {
+      throw new IllegalArgumentException("Variants must belong to a parent product with variants");
+    }
+    if (product.getParentProduct() != null
+        && parent != null
+        && !product.getParentProduct().getId().equals(parent.getId())) {
+      throw new IllegalArgumentException("A variant cannot be moved to another parent");
+    }
+    if (type != product.getProductType()) {
+      Number usage =
+          jdbcTemplate.queryForObject(
+              "select (select count(*) from inventory_items where product_id=?) + (select count(*) from sale_lines where product_id=?) + (select count(*) from products where parent_product_id=?)",
+              Number.class,
+              product.getId(),
+              product.getId(),
+              product.getId());
+      if (usage != null && usage.longValue() > 0)
+        throw new IllegalArgumentException(
+            "Product type cannot change after inventory, sales, or variants exist");
+    }
+    Map<String, String> attributes =
+        request.variantAttributes() == null
+            ? product.getVariantAttributes()
+            : request.variantAttributes();
+    if (parent != null && attributes.isEmpty())
+      throw new IllegalArgumentException("Add at least one variant attribute");
+    int reorderLevel =
+        request.reorderLevel() == null ? product.getDefaultReorderLevel() : request.reorderLevel();
+    boolean reorderLevelChanged = reorderLevel != product.getDefaultReorderLevel();
+    product.configureVariants(type, parent, attributes, reorderLevel);
+    if (request.reorderLevel() != null && reorderLevelChanged) {
+      jdbcTemplate.update(
+          "update inventory_items set reorder_level=?, version=version+1 where organization_id=? and product_id=?",
+          reorderLevel,
+          user.organizationId(),
+          product.getId());
+    }
   }
 
   private void requireSkuAvailable(UUID organizationId, String sku) {

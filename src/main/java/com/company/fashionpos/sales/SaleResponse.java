@@ -10,9 +10,6 @@ public record SaleResponse(
     String saleNumber,
     UUID branchId,
     String branchName,
-    UUID soldByEmployeeId,
-    String soldByEmployeeName,
-    String soldByEmployeeNumber,
     String customerName,
     BigDecimal subtotalAmount,
     BigDecimal discountAmount,
@@ -34,11 +31,6 @@ public record SaleResponse(
         sale.getSaleNumber(),
         sale.getBranch().getId(),
         sale.getBranch().getName(),
-        sale.getSoldByEmployee() == null ? null : sale.getSoldByEmployee().getId(),
-        sale.getSoldByEmployee() == null
-            ? null
-            : com.company.fashionpos.hr.EmployeeProfileResponse.fullName(sale.getSoldByEmployee()),
-        sale.getSoldByEmployee() == null ? null : sale.getSoldByEmployee().getEmployeeNumber(),
         sale.getCustomerName(),
         sale.getSubtotalAmount(),
         sale.getDiscountAmount(),

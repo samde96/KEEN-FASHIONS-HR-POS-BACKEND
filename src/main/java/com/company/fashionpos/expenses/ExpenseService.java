@@ -4,6 +4,7 @@ import com.company.fashionpos.branch.Branch;
 import com.company.fashionpos.branch.BranchRepository;
 import com.company.fashionpos.branch.BranchService;
 import com.company.fashionpos.shared.security.AuthenticatedUser;
+import com.company.fashionpos.shifts.CashierShiftService;
 import jakarta.persistence.EntityNotFoundException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -25,20 +26,24 @@ public class ExpenseService {
   private final ExpenseRepository expenseRepository;
   private final BranchRepository branchRepository;
   private final BranchService branchService;
+  private final CashierShiftService cashierShifts;
 
   public ExpenseService(
       ExpenseRepository expenseRepository,
       BranchRepository branchRepository,
-      BranchService branchService) {
+      BranchService branchService,
+      CashierShiftService cashierShifts) {
     this.expenseRepository = expenseRepository;
     this.branchRepository = branchRepository;
     this.branchService = branchService;
+    this.cashierShifts = cashierShifts;
   }
 
   @Transactional(readOnly = true)
   public List<ExpenseResponse> listExpenses(AuthenticatedUser user) {
     return expenseRepository.findWithinOrganization(user.organizationId()).stream()
         .filter(expense -> canAccessBranch(user, expense.getBranch().getId()))
+        .filter(expense -> !user.isCashier() || user.userId().equals(expense.getCreatedBy()))
         .map(ExpenseResponse::from)
         .toList();
   }
@@ -46,6 +51,7 @@ public class ExpenseService {
   @Transactional
   public ExpenseResponse createExpense(AuthenticatedUser user, ExpenseRequest request) {
     branchService.requireBranchAccess(user, request.branchId());
+    cashierShifts.lockOperator(user);
     Branch branch = requireBranch(user, request.branchId());
     ExpenseStatus status = statusOrPending(request.status());
     if (status == ExpenseStatus.VOID) {
@@ -66,6 +72,7 @@ public class ExpenseService {
             normalizeOptional(request.paymentReference()),
             status,
             normalizeOptional(request.notes()));
+    expense.recordCreator(user.userId());
     return ExpenseResponse.from(expenseRepository.save(expense));
   }
 
@@ -131,6 +138,6 @@ public class ExpenseService {
   }
 
   private static boolean canAccessBranch(AuthenticatedUser user, UUID branchId) {
-    return user.branchIds().isEmpty() || user.branchIds().contains(branchId);
+    return (!user.isCashier() && user.branchIds().isEmpty()) || user.branchIds().contains(branchId);
   }
 }

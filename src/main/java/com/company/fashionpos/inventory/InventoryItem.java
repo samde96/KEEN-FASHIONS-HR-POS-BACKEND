@@ -60,6 +60,7 @@ public class InventoryItem {
     this.organization = organization;
     this.branch = branch;
     this.product = product;
+    this.reorderLevel = product.getDefaultReorderLevel();
   }
 
   @PrePersist

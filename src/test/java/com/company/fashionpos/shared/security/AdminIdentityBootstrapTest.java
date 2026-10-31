@@ -101,6 +101,30 @@ class AdminIdentityBootstrapTest {
         .hasMessage("FASHIONPOS_ADMIN_EMAIL must be set in .env");
   }
 
+  @Test
+  void preservesBusinessTimezoneAcrossRestarts() {
+    JdbcTemplate jdbc = jdbcTemplate();
+    createBootstrapTables(jdbc);
+    var bootstrap =
+        new AdminIdentityBootstrap(
+            jdbc,
+            new BCryptPasswordEncoder(4),
+            "owner@example.test",
+            "test-password",
+            "KEEN Retail",
+            "KES",
+            "Africa/Nairobi",
+            "Owner");
+    bootstrap.run(null);
+    UUID organization = UUID.fromString("00000000-0000-4000-8000-000000000001");
+    jdbc.update("update organizations set time_zone='Asia/Tokyo' where id=?", organization);
+    bootstrap.run(null);
+    assertThat(
+            jdbc.queryForObject(
+                "select time_zone from organizations where id=?", String.class, organization))
+        .isEqualTo("Asia/Tokyo");
+  }
+
   private static JdbcTemplate jdbcTemplate() {
     var dataSource =
         new DriverManagerDataSource(

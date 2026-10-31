@@ -696,6 +696,7 @@ public class AccountingService {
             """
                 + filter.where()
                 + (accountId == null ? "" : " and account.id = ?")
+                + "\n"
                 + """
                 order by entry.entry_date, entry.created_at, entry.journal_number, line.id
                 limit 500
@@ -756,7 +757,12 @@ public class AccountingService {
     BigDecimal totalCredit =
         rows.stream().map(TrialBalanceRow::creditAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
     return new TrialBalanceResponse(
-        range.from(), range.to(), money(totalDebit), money(totalCredit), money(totalDebit.subtract(totalCredit)), rows);
+        range.from(),
+        range.to(),
+        money(totalDebit),
+        money(totalCredit),
+        money(totalDebit.subtract(totalCredit)),
+        rows);
   }
 
   @Transactional(readOnly = true)
@@ -764,7 +770,8 @@ public class AccountingService {
       AuthenticatedUser user, UUID branchId, LocalDate from, LocalDate to) {
     DateRange range = normalizedPeriodRange(from, to);
     List<AccountBalance> balances =
-        accountBalances(user, branchId, range.from(), range.to(), Set.of("REVENUE", "COGS", "EXPENSE"));
+        accountBalances(
+            user, branchId, range.from(), range.to(), Set.of("REVENUE", "COGS", "EXPENSE"));
     List<FinancialStatementRow> revenueRows = statementRows(balances, "REVENUE");
     List<FinancialStatementRow> cogsRows = statementRows(balances, "COGS");
     List<FinancialStatementRow> expenseRows = statementRows(balances, "EXPENSE");
@@ -797,8 +804,7 @@ public class AccountingService {
     BigDecimal assets = sumStatementRows(assetRows);
     BigDecimal liabilities = sumStatementRows(liabilityRows);
     BigDecimal equity = sumStatementRows(equityRows);
-    ProfitAndLossResponse retained =
-        profitAndLoss(user, branchId, LocalDate.of(1900, 1, 1), asOf);
+    ProfitAndLossResponse retained = profitAndLoss(user, branchId, LocalDate.of(1900, 1, 1), asOf);
     BigDecimal retainedEarnings = retained.netIncome();
     BigDecimal totalLiabilitiesAndEquity = liabilities.add(equity).add(retainedEarnings);
     return new BalanceSheetResponse(
@@ -876,6 +882,7 @@ public class AccountingService {
             join accounts account on account.id = line.account_id
             """
                 + filter.where()
+                + "\n"
                 + """
                 and account.account_type = 'ASSET'
                 and (
@@ -1043,9 +1050,13 @@ public class AccountingService {
             this::mapJournalLine,
             header.id());
     BigDecimal totalDebit =
-        lines.stream().map(JournalLineResponse::debitAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
+        lines.stream()
+            .map(JournalLineResponse::debitAmount)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
     BigDecimal totalCredit =
-        lines.stream().map(JournalLineResponse::creditAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
+        lines.stream()
+            .map(JournalLineResponse::creditAmount)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
     return new JournalEntryResponse(
         header.id(),
         header.branchId(),
@@ -1113,7 +1124,8 @@ public class AccountingService {
       boolean hasDebit = debit.signum() > 0;
       boolean hasCredit = credit.signum() > 0;
       if (hasDebit == hasCredit) {
-        throw new IllegalArgumentException("Each journal line must have either a debit or a credit");
+        throw new IllegalArgumentException(
+            "Each journal line must have either a debit or a credit");
       }
       totalDebit = totalDebit.add(debit);
       totalCredit = totalCredit.add(credit);
@@ -1152,6 +1164,7 @@ public class AccountingService {
         """
             + filter.where()
             + typePredicate
+            + "\n"
             + """
             group by account.id, account.account_code, account.account_name, account.account_type
             order by account.account_code
@@ -1206,18 +1219,23 @@ public class AccountingService {
   private BigDecimal statementAmount(AccountBalance balance) {
     return switch (balance.accountType()) {
       case "ASSET", "COGS", "EXPENSE" -> balance.debitAmount().subtract(balance.creditAmount());
-      case "LIABILITY", "EQUITY", "REVENUE" -> balance.creditAmount().subtract(balance.debitAmount());
+      case "LIABILITY", "EQUITY", "REVENUE" ->
+          balance.creditAmount().subtract(balance.debitAmount());
       default -> BigDecimal.ZERO;
     };
   }
 
   private BigDecimal sumStatementRows(List<FinancialStatementRow> rows) {
-    return rows.stream().map(FinancialStatementRow::amount).reduce(BigDecimal.ZERO, BigDecimal::add);
+    return rows.stream()
+        .map(FinancialStatementRow::amount)
+        .reduce(BigDecimal.ZERO, BigDecimal::add);
   }
 
   private BigDecimal normalBalanceMovement(
       String accountType, BigDecimal debitAmount, BigDecimal creditAmount) {
-    if ("LIABILITY".equals(accountType) || "EQUITY".equals(accountType) || "REVENUE".equals(accountType)) {
+    if ("LIABILITY".equals(accountType)
+        || "EQUITY".equals(accountType)
+        || "REVENUE".equals(accountType)) {
       return creditAmount.subtract(debitAmount);
     }
     return debitAmount.subtract(creditAmount);
@@ -1241,7 +1259,9 @@ public class AccountingService {
             Integer.class,
             branchId,
             user.organizationId());
-    if (count == null || count == 0 || (!user.branchIds().isEmpty() && !user.branchIds().contains(branchId))) {
+    if (count == null
+        || count == 0
+        || (!user.branchIds().isEmpty() && !user.branchIds().contains(branchId))) {
       throw new AccessDeniedException("Branch is outside the authenticated user's scope");
     }
   }
@@ -1280,7 +1300,8 @@ public class AccountingService {
     }
   }
 
-  private BranchPredicate branchPredicate(AuthenticatedUser user, String alias, boolean includeNull) {
+  private BranchPredicate branchPredicate(
+      AuthenticatedUser user, String alias, boolean includeNull) {
     if (user.branchIds().isEmpty()) {
       return new BranchPredicate("", List.of());
     }
@@ -1304,9 +1325,7 @@ public class AccountingService {
       }
       List<UUID> parents =
           jdbcTemplate.queryForList(
-              "select parent_account_id from accounts where id = ?",
-              UUID.class,
-              current);
+              "select parent_account_id from accounts where id = ?", UUID.class, current);
       current = parents.isEmpty() ? null : parents.get(0);
     }
     return false;

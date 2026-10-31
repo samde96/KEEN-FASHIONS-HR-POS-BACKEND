@@ -1,7 +1,6 @@
 package com.company.fashionpos.sales;
 
 import com.company.fashionpos.branch.Branch;
-import com.company.fashionpos.hr.Employee;
 import com.company.fashionpos.organization.Organization;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -22,6 +21,13 @@ import java.util.UUID;
 @Table(name = "sales")
 public class Sale {
 
+  @Column(name = "cashier_id")
+  private UUID cashierId;
+
+  public void setCashierId(UUID cashierId) {
+    this.cashierId = cashierId;
+  }
+
   @Id private UUID id;
 
   @ManyToOne(fetch = FetchType.LAZY, optional = false)
@@ -31,10 +37,6 @@ public class Sale {
   @ManyToOne(fetch = FetchType.LAZY, optional = false)
   @JoinColumn(name = "branch_id", nullable = false)
   private Branch branch;
-
-  @ManyToOne(fetch = FetchType.LAZY)
-  @JoinColumn(name = "sold_by_employee_id")
-  private Employee soldByEmployee;
 
   @Column(name = "sale_number", nullable = false, length = 40)
   private String saleNumber;
@@ -77,7 +79,6 @@ public class Sale {
       UUID id,
       Organization organization,
       Branch branch,
-      Employee soldByEmployee,
       String saleNumber,
       String idempotencyKey,
       String customerName,
@@ -88,7 +89,6 @@ public class Sale {
     this.id = id;
     this.organization = organization;
     this.branch = branch;
-    this.soldByEmployee = soldByEmployee;
     this.saleNumber = saleNumber;
     this.idempotencyKey = idempotencyKey;
     this.customerName = customerName;
@@ -122,10 +122,6 @@ public class Sale {
 
   public Branch getBranch() {
     return branch;
-  }
-
-  public Employee getSoldByEmployee() {
-    return soldByEmployee;
   }
 
   public String getSaleNumber() {

@@ -12,6 +12,14 @@ out/
 *.p12
 *.pfx
 *.jks
+*.keystore
+*.p8
+*.env
+.envrc
+.npmrc
+.netrc
+.vercel/
+.render/
 
 # Maven/local runtime artifacts
 .mvn/wrapper/maven-wrapper.jar
@@ -26,6 +34,12 @@ replay_pid*
 *.trace.db
 *.sqlite
 *.sqlite3
+*.db
+*.db-*
+*.dump
+*.backup
+backups/
+uploads/
 
 # Logs and scratch API output
 *.log
@@ -47,3 +61,13 @@ resp_headers.txt
 .project
 .settings/
 .factorypath
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+desktop.ini
+__pycache__/
+*.py[cod]
+.venv/
+venv/

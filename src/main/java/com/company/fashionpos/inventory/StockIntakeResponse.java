@@ -24,7 +24,7 @@ public record StockIntakeResponse(
         intake.getBranch().getId(),
         intake.getBranch().getName(),
         intake.getProduct().getId(),
-        intake.getProduct().getName(),
+        intake.getProduct().getDisplayName(),
         intake.getProduct().getSku(),
         intake.getSupplierName(),
         intake.getReferenceNumber(),

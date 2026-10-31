@@ -23,9 +23,13 @@ import org.springframework.transaction.annotation.Transactional;
 public class StaffService {
 
   private static final String ADMIN_ROLE_KEY = "ADMIN";
-  private static final String OWNER_ROLE_KEY = "OWNER";
+  private static final String SHOP_MANAGER_ROLE_KEY = "SHOP_MANAGER";
+  private static final String CASHIER_ROLE_KEY = "CASHIER";
+  private static final Set<String> CASHIER_PERMISSIONS =
+      Set.of("pos:sell", "expenses:create", "shifts:manage");
+  private static final Set<String> SUPPORTED_ROLE_KEYS =
+      Set.of(ADMIN_ROLE_KEY, SHOP_MANAGER_ROLE_KEY, CASHIER_ROLE_KEY);
   private static final String PROFIT_VIEW_PERMISSION = "profit:view";
-  private static final String HR_PERMISSION_PREFIX = "hr:";
 
   private final UserAccountRepository userAccountRepository;
   private final RoleRepository roleRepository;
@@ -49,11 +53,32 @@ public class StaffService {
     this.passwordEncoder = passwordEncoder;
   }
 
-  @Transactional(readOnly = true)
+  @Transactional
   public List<RoleResponse> listRoles(AuthenticatedUser user) {
+    ensureCashierRole(user.organizationId());
     return roleRepository.findWithinOrganization(user.organizationId()).stream()
+        .filter(role -> SUPPORTED_ROLE_KEYS.contains(role.getKey()))
         .map(this::toRoleResponse)
         .toList();
+  }
+
+  private void ensureCashierRole(UUID organizationId) {
+    jdbcTemplate.update(
+        """
+        insert into roles(id, organization_id, name, role_key, description, created_at, updated_at, version)
+        select gen_random_uuid(), id, 'Cashier', 'CASHIER',
+          'Shop sales, own expense registration, and own opening and closing shifts', now(), now(), 0
+        from organizations where id=? on conflict (organization_id, role_key) do nothing
+        """,
+        organizationId);
+    jdbcTemplate.update(
+        """
+        insert into role_permissions(role_id, permission_id)
+        select r.id,p.id from roles r cross join permissions p
+        where r.organization_id=? and r.role_key='CASHIER'
+          and p.code in ('pos:sell','expenses:create','shifts:manage') on conflict do nothing
+        """,
+        organizationId);
   }
 
   @Transactional(readOnly = true)
@@ -245,6 +270,19 @@ public class StaffService {
       if (!roleRepository.existsWithinOrganization(roleId, user.organizationId())) {
         throw new EntityNotFoundException("Role not found");
       }
+      requireSupportedRole(roleId);
+    }
+
+    boolean cashier =
+        roleIds.stream()
+            .anyMatch(
+                roleId ->
+                    jdbcTemplate
+                        .queryForList(
+                            "select role_key from roles where id = ?", String.class, roleId)
+                        .contains(CASHIER_ROLE_KEY));
+    if (cashier && (roleIds.size() != 1 || branchIds.isEmpty())) {
+      throw new IllegalArgumentException("Cashier must be assigned alone and to at least one shop");
     }
 
     for (UUID branchId : branchIds) {
@@ -297,6 +335,17 @@ public class StaffService {
 
   private void assignRolePermissions(
       UUID roleId, String roleKey, Set<UUID> requestedPermissionIds) {
+    if (CASHIER_ROLE_KEY.equals(roleKey)
+        && (requestedPermissionIds == null
+            || requestedPermissionIds.size() != CASHIER_PERMISSIONS.size()
+            || requestedPermissionIds.stream()
+                .anyMatch(
+                    id ->
+                        CASHIER_PERMISSIONS.stream()
+                            .noneMatch(code -> permissionHasCode(id, code))))) {
+      throw new IllegalArgumentException(
+          "Cashier permissions are limited to sales, expenses, and own shifts");
+    }
     if (requestedPermissionIds == null) {
       return;
     }
@@ -310,10 +359,6 @@ public class StaffService {
     if (includesProfitViewPermission(permissionIds) && !ADMIN_ROLE_KEY.equals(roleKey)) {
       throw new IllegalArgumentException("Only the Admin role can be assigned profit visibility");
     }
-    if (includesHrPermission(permissionIds) && !ADMIN_ROLE_KEY.equals(roleKey)) {
-      throw new IllegalArgumentException("Only the Admin role can be assigned HR permissions");
-    }
-
     jdbcTemplate.update("delete from role_permissions where role_id = ?", roleId);
     batchInsertPermissionAssignments(roleId, List.copyOf(permissionIds));
   }
@@ -477,27 +522,11 @@ public class StaffService {
     return false;
   }
 
-  private boolean includesHrPermission(Set<UUID> permissionIds) {
-    for (UUID permissionId : permissionIds) {
-      if (permissionCodeStartsWith(permissionId, HR_PERMISSION_PREFIX)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
   private boolean permissionHasCode(UUID permissionId, String code) {
     return exists(
         "select count(*) from permissions where id = ? and lower(code) = lower(?)",
         permissionId,
         code);
-  }
-
-  private boolean permissionCodeStartsWith(UUID permissionId, String prefix) {
-    return exists(
-        "select count(*) from permissions where id = ? and lower(code) like ?",
-        permissionId,
-        prefix.toLowerCase(Locale.ROOT) + "%");
   }
 
   private boolean permissionCodeExists(String code) {
@@ -539,8 +568,18 @@ public class StaffService {
   }
 
   private static void requireSupportedRoleKey(String key) {
-    if (OWNER_ROLE_KEY.equals(key)) {
-      throw new IllegalArgumentException("Owner role is no longer supported");
+    if (!SUPPORTED_ROLE_KEYS.contains(key)) {
+      throw new IllegalArgumentException(
+          "Only Admin, Shop Manager, and Cashier roles are supported");
+    }
+  }
+
+  private void requireSupportedRole(UUID roleId) {
+    List<String> roleKeys =
+        jdbcTemplate.queryForList("select role_key from roles where id = ?", String.class, roleId);
+    if (roleKeys.isEmpty() || !SUPPORTED_ROLE_KEYS.contains(roleKeys.get(0))) {
+      throw new IllegalArgumentException(
+          "Only Admin, Shop Manager, and Cashier roles are supported");
     }
   }
 

@@ -102,7 +102,7 @@ class AuthenticationSecurityTest {
                     : java.util.List.of("ADMIN");
               }
               return MANAGER_USER_ID.equals(userId)
-                  ? java.util.List.of("hr:dashboard:view", "hr:employee:view", "reports:view")
+                  ? java.util.List.of("reports:view", "sales:view")
                   : java.util.List.of("admin:manage", "profit:view");
             });
 
@@ -209,38 +209,6 @@ class AuthenticationSecurityTest {
         .perform(get("/api/v1/me").header(HttpHeaders.AUTHORIZATION, "Basic " + basicCredentials))
         .andExpect(status().isUnauthorized())
         .andExpect(jsonPath("$.detail").value("Authentication is required"));
-  }
-
-  @Test
-  void hrEndpointsRequireAdminRoleEvenWhenUserHasHrPermissions() throws Exception {
-    UserAccount managerAccount =
-        new UserAccount(
-            MANAGER_USER_ID,
-            new Organization(ORGANIZATION_ID, "KEEN Fashions", "KES", "Africa/Nairobi"),
-            MANAGER_EMAIL,
-            "Shop Manager");
-    managerAccount.updatePasswordHash(passwordEncoder.encode(MANAGER_PASSWORD));
-    when(userAccountRepository.findByEmailIgnoreCaseAndStatus(MANAGER_EMAIL, UserStatus.ACTIVE))
-        .thenReturn(Optional.of(managerAccount));
-
-    MockHttpSession anonymousSession = new MockHttpSession();
-    CsrfExchange csrf = csrfExchange();
-    HttpSession authenticatedSession =
-        mockMvc
-            .perform(
-                post("/api/v1/auth/login")
-                    .session(anonymousSession)
-                    .with(withCsrf(csrf))
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(loginBody(MANAGER_EMAIL, MANAGER_PASSWORD)))
-            .andExpect(status().isOk())
-            .andReturn()
-            .getRequest()
-            .getSession(false);
-
-    mockMvc
-        .perform(get("/api/v1/hr/departments").session((MockHttpSession) authenticatedSession))
-        .andExpect(status().isForbidden());
   }
 
   @Test

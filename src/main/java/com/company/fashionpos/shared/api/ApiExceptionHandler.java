@@ -19,6 +19,13 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @RestControllerAdvice
 public class ApiExceptionHandler {
 
+  @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
+  ProblemDetail statusProblem(org.springframework.web.server.ResponseStatusException exception) {
+    return ProblemDetail.forStatusAndDetail(
+        exception.getStatusCode(),
+        exception.getReason() == null ? "Request could not be completed" : exception.getReason());
+  }
+
   @ExceptionHandler(EntityNotFoundException.class)
   ProblemDetail notFound(EntityNotFoundException exception) {
     ProblemDetail problem =

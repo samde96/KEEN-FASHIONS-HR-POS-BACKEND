@@ -105,7 +105,12 @@ public class ErpModulesService {
                 "Blocked credit sales"),
             moneyMetric(
                 "Receivables",
-                sum("customers", "record", user, BranchScope.OPTIONAL, "record.outstanding_balance"),
+                sum(
+                    "customers",
+                    "record",
+                    user,
+                    BranchScope.OPTIONAL,
+                    "record.outstanding_balance"),
                 "Customer balances"),
             metric(
                 "Business customers",
@@ -269,7 +274,10 @@ public class ErpModulesService {
         "Accounting",
         "Chart of accounts, journals, financial periods, tax rules, AR and AP.",
         List.of(
-            metric("Accounts", count("accounts", "record", user, BranchScope.NONE), "Chart of accounts"),
+            metric(
+                "Accounts",
+                count("accounts", "record", user, BranchScope.NONE),
+                "Chart of accounts"),
             metric(
                 "Posted journals",
                 countWhere(
@@ -321,77 +329,17 @@ public class ErpModulesService {
   }
 
   @Transactional(readOnly = true)
-  public ModuleSummary etimsSummary(AuthenticatedUser user) {
-    return new ModuleSummary(
-        "etims",
-        "eTIMS",
-        "KRA eTIMS configuration, fiscal submission queue, retries, and tax reports.",
-        List.of(
-            metric(
-                "Configured branches",
-                count("etims_configurations", "record", user, BranchScope.OPTIONAL),
-                "eTIMS setup"),
-            metric(
-                "Pending submissions",
-                countWhere(
-                    "etims_submission_queue",
-                    "record",
-                    user,
-                    BranchScope.OPTIONAL,
-                    "and record.status in ('PENDING', 'RETRY_REQUIRED')"),
-                "Needs processing"),
-            metric(
-                "Accepted",
-                countWhere(
-                    "etims_submission_queue",
-                    "record",
-                    user,
-                    BranchScope.OPTIONAL,
-                    "and record.status = 'ACCEPTED'"),
-                "Fiscalized"),
-            metric(
-                "Failed",
-                countWhere(
-                    "etims_submission_queue",
-                    "record",
-                    user,
-                    BranchScope.OPTIONAL,
-                    "and record.status in ('FAILED', 'REJECTED')"),
-                "Needs review")),
-        recentWorkItems(
-            """
-            select
-              submission.id,
-              submission.idempotency_key as reference,
-              submission.source_type as title,
-              submission.status,
-              null as amount,
-              branch.name as branch_name,
-              cast(submission.next_attempt_at as date) as due_date,
-              submission.created_at
-            from etims_submission_queue submission
-            left join branches branch on branch.id = submission.branch_id
-            """,
-            "submission",
-            user,
-            BranchScope.OPTIONAL));
-  }
-
-  @Transactional(readOnly = true)
   public ModuleSummary notificationsSummary(AuthenticatedUser user) {
     return new ModuleSummary(
         "notifications",
         "Notifications",
-        "Operational alerts for approvals, stock, fiscalization, payroll, and payments.",
+        "Operational alerts for approvals, stock, and payments.",
         List.of(
             metric(
                 "Unread",
                 countNotifications(user, "and notification.status = 'UNREAD'"),
                 "Requires attention"),
-            metric(
-                "All alerts",
-                countNotifications(user, ""),
-                "Current organization"),
+            metric("All alerts", countNotifications(user, ""), "Current organization"),
             metric(
                 "Dismissed",
                 countNotifications(user, "and notification.status = 'DISMISSED'"),
@@ -603,7 +551,10 @@ public class ErpModulesService {
   }
 
   private Scope scope(
-      AuthenticatedUser user, String organizationAlias, String branchAlias, BranchScope branchScope) {
+      AuthenticatedUser user,
+      String organizationAlias,
+      String branchAlias,
+      BranchScope branchScope) {
     List<Object> args = new ArrayList<>();
     args.add(user.organizationId());
     StringBuilder where = new StringBuilder(" where ");
@@ -612,7 +563,8 @@ public class ErpModulesService {
     if (branchScope != BranchScope.NONE && !user.branchIds().isEmpty()) {
       String placeholders = placeholders(user.branchIds().size());
       if (branchScope == BranchScope.OPTIONAL) {
-        where.append(" and (")
+        where
+            .append(" and (")
             .append(branchAlias)
             .append(".branch_id is null or ")
             .append(branchAlias)
@@ -620,7 +572,8 @@ public class ErpModulesService {
             .append(placeholders)
             .append("))");
       } else {
-        where.append(" and ")
+        where
+            .append(" and ")
             .append(branchAlias)
             .append(".branch_id in (")
             .append(placeholders)

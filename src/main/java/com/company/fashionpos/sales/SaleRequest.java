@@ -11,7 +11,6 @@ import java.util.UUID;
 
 public record SaleRequest(
     @NotNull UUID branchId,
-    UUID soldByEmployeeId,
     @Size(max = 160) String customerName,
     PaymentMethod paymentMethod,
     @Size(max = 80) String paymentReference,

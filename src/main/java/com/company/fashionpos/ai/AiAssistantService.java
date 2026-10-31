@@ -4,13 +4,6 @@ import com.company.fashionpos.branch.Branch;
 import com.company.fashionpos.branch.BranchRepository;
 import com.company.fashionpos.expenses.Expense;
 import com.company.fashionpos.expenses.ExpenseRepository;
-import com.company.fashionpos.hr.AttendanceRecord;
-import com.company.fashionpos.hr.AttendanceRepository;
-import com.company.fashionpos.hr.Employee;
-import com.company.fashionpos.hr.EmployeeRepository;
-import com.company.fashionpos.hr.LeaveRequest;
-import com.company.fashionpos.hr.LeaveRequestRepository;
-import com.company.fashionpos.hr.LeaveRequestStatus;
 import com.company.fashionpos.inventory.InventoryItem;
 import com.company.fashionpos.inventory.InventoryRepository;
 import com.company.fashionpos.sales.Sale;
@@ -19,7 +12,6 @@ import com.company.fashionpos.shared.audit.AuditEventService;
 import com.company.fashionpos.shared.security.AuthenticatedUser;
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.time.LocalDate;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -33,9 +25,6 @@ public class AiAssistantService {
   private final SaleRepository saleRepository;
   private final InventoryRepository inventoryRepository;
   private final ExpenseRepository expenseRepository;
-  private final EmployeeRepository employeeRepository;
-  private final AttendanceRepository attendanceRepository;
-  private final LeaveRequestRepository leaveRequestRepository;
   private final BranchRepository branchRepository;
   private final AuditEventService auditEventService;
 
@@ -43,17 +32,11 @@ public class AiAssistantService {
       SaleRepository saleRepository,
       InventoryRepository inventoryRepository,
       ExpenseRepository expenseRepository,
-      EmployeeRepository employeeRepository,
-      AttendanceRepository attendanceRepository,
-      LeaveRequestRepository leaveRequestRepository,
       BranchRepository branchRepository,
       AuditEventService auditEventService) {
     this.saleRepository = saleRepository;
     this.inventoryRepository = inventoryRepository;
     this.expenseRepository = expenseRepository;
-    this.employeeRepository = employeeRepository;
-    this.attendanceRepository = attendanceRepository;
-    this.leaveRequestRepository = leaveRequestRepository;
     this.branchRepository = branchRepository;
     this.auditEventService = auditEventService;
   }
@@ -87,15 +70,6 @@ public class AiAssistantService {
     if (mentionsAny(normalized, "expense", "expenses", "spending", "cost")) {
       return expensesAnswer(user);
     }
-    if (mentionsAny(normalized, "attendance", "present", "absent", "late")) {
-      return attendanceAnswer(user);
-    }
-    if (mentionsAny(normalized, "leave", "leave request", "time off")) {
-      return leaveAnswer(user);
-    }
-    if (mentionsAny(normalized, "employee", "employees", "staff", "headcount")) {
-      return employeeAnswer(user);
-    }
     return overviewAnswer(user);
   }
 
@@ -103,19 +77,16 @@ public class AiAssistantService {
     List<Branch> branches = scopedBranches(user);
     List<Sale> sales = scopedSales(user);
     List<Expense> expenses = scopedExpenses(user);
-    List<Employee> employees = scopedEmployees(user);
     BigDecimal revenue =
         sales.stream().map(Sale::getTotalAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
     BigDecimal cost =
         expenses.stream().map(Expense::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
 
     return new AiAssistantResponse(
-        "I can help with read-only summaries for sales, inventory, expenses, employees, attendance, and leave. "
+        "I can help with read-only summaries for sales, inventory, and expenses. "
             + "Right now you have access to "
             + branches.size()
             + " active branches, "
-            + employees.size()
-            + " employees, "
             + sales.size()
             + " sales totaling "
             + money(revenue)
@@ -124,14 +95,9 @@ public class AiAssistantService {
             + ".",
         List.of(
             "Live ERP data: branches in your access scope",
-            "Live ERP data: employee records in your access scope",
             "Live ERP data: sales in your access scope",
             "Live ERP data: expenses in your access scope"),
-        List.of(
-            "Show today's sales summary",
-            "Show low stock items",
-            "Show attendance summary",
-            "Show pending leave requests"));
+        List.of("Show today's sales summary", "Show low stock items", "Show expenses summary"));
   }
 
   private AiAssistantResponse salesAnswer(AuthenticatedUser user) {
@@ -180,7 +146,7 @@ public class AiAssistantService {
     return new AiAssistantResponse(
         summary,
         List.of("Live ERP data: inventory filtered to your authorized branches"),
-        List.of("Show today's sales summary", "Show expenses summary", "Show employee headcount"));
+        List.of("Show today's sales summary", "Show expenses summary"));
   }
 
   private AiAssistantResponse expensesAnswer(AuthenticatedUser user) {
@@ -198,86 +164,7 @@ public class AiAssistantService {
             + money(total)
             + ".",
         List.of("Live ERP data: expenses filtered to your authorized branches"),
-        List.of(
-            "Show today's sales summary", "Show low stock items", "Show pending leave requests"));
-  }
-
-  private AiAssistantResponse employeeAnswer(AuthenticatedUser user) {
-    List<Employee> employees = scopedEmployees(user);
-    long active = employees.stream().filter(Employee::isActive).count();
-    return new AiAssistantResponse(
-        "You currently have "
-            + employees.size()
-            + " employees in scope, with "
-            + active
-            + " marked active.",
-        List.of("Live ERP data: employees filtered to your authorized branches"),
-        List.of("Show attendance summary", "Show pending leave requests", "Show payroll overview"));
-  }
-
-  private AiAssistantResponse attendanceAnswer(AuthenticatedUser user) {
-    List<AttendanceRecord> attendance = scopedAttendance(user);
-    LocalDate today = LocalDate.now();
-    List<AttendanceRecord> todaysRecords =
-        attendance.stream().filter((record) -> today.equals(record.getAttendanceDate())).toList();
-    long present =
-        todaysRecords.stream()
-            .filter((record) -> record.getStatus().name().equals("PRESENT"))
-            .count();
-    long late =
-        todaysRecords.stream().filter((record) -> record.getStatus().name().equals("LATE")).count();
-    long absent =
-        todaysRecords.stream()
-            .filter((record) -> record.getStatus().name().equals("ABSENT"))
-            .count();
-
-    return new AiAssistantResponse(
-        "Attendance for today in your scope: "
-            + present
-            + " present, "
-            + late
-            + " late, and "
-            + absent
-            + " absent across "
-            + todaysRecords.size()
-            + " attendance records.",
-        List.of("Live ERP data: attendance filtered to your authorized branches"),
-        List.of(
-            "Show employees summary", "Show pending leave requests", "Show today's sales summary"));
-  }
-
-  private AiAssistantResponse leaveAnswer(AuthenticatedUser user) {
-    List<LeaveRequest> leaveRequests = scopedLeaveRequests(user);
-    List<LeaveRequest> pending =
-        leaveRequests.stream()
-            .filter((request) -> request.getStatus() == LeaveRequestStatus.PENDING_APPROVAL)
-            .limit(5)
-            .toList();
-
-    String detail =
-        pending.isEmpty()
-            ? "There are no pending leave requests in your accessible branches."
-            : "Pending leave requests: "
-                + pending.stream()
-                    .map(
-                        request ->
-                            request.getEmployee().getFirstName()
-                                + " "
-                                + request.getEmployee().getLastName()
-                                + " ("
-                                + request.getLeaveType().getName()
-                                + " "
-                                + request.getStartDate()
-                                + " to "
-                                + request.getEndDate()
-                                + ")")
-                    .reduce((left, right) -> left + "; " + right)
-                    .orElse("");
-
-    return new AiAssistantResponse(
-        detail,
-        List.of("Live ERP data: leave requests filtered to your authorized branches"),
-        List.of("Show attendance summary", "Show employees summary", "Show today's sales summary"));
+        List.of("Show today's sales summary", "Show low stock items"));
   }
 
   private List<Branch> scopedBranches(AuthenticatedUser user) {
@@ -296,24 +183,6 @@ public class AiAssistantService {
   private List<Expense> scopedExpenses(AuthenticatedUser user) {
     return expenseRepository.findWithinOrganization(user.organizationId()).stream()
         .filter((expense) -> canAccessBranch(user, expense.getBranch().getId()))
-        .toList();
-  }
-
-  private List<Employee> scopedEmployees(AuthenticatedUser user) {
-    return employeeRepository.findWithinOrganization(user.organizationId()).stream()
-        .filter((employee) -> canAccessBranch(user, employee.getPrimaryBranch().getId()))
-        .toList();
-  }
-
-  private List<AttendanceRecord> scopedAttendance(AuthenticatedUser user) {
-    return attendanceRepository.findWithinOrganization(user.organizationId()).stream()
-        .filter((record) -> canAccessBranch(user, record.getBranch().getId()))
-        .toList();
-  }
-
-  private List<LeaveRequest> scopedLeaveRequests(AuthenticatedUser user) {
-    return leaveRequestRepository.findWithinOrganization(user.organizationId()).stream()
-        .filter((request) -> canAccessBranch(user, request.getBranch().getId()))
         .toList();
   }
 

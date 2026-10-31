@@ -70,16 +70,4 @@ public class InventoryController {
       @Valid @RequestBody StockIntakeRequest request, Principal principal) {
     return inventoryService.addStock(authenticatedUserService.current(principal), request);
   }
-
-  @GetMapping("/transfers")
-  public List<StockTransferResponse> listTransfers(Principal principal) {
-    return inventoryService.listTransfers(authenticatedUserService.current(principal));
-  }
-
-  @PostMapping("/transfers")
-  @ResponseStatus(HttpStatus.CREATED)
-  public StockTransferResponse transferStock(
-      @Valid @RequestBody StockTransferRequest request, Principal principal) {
-    return inventoryService.transferStock(authenticatedUserService.current(principal), request);
-  }
 }

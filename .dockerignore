@@ -1,0 +1,20 @@
+# Only application inputs enter the Docker build context.
+**
+!pom.xml
+!src/
+!src/**
+!Dockerfile
+!.dockerignore
+
+# Exclude local overrides even if saved under src/.
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*.jks
+**/application-local.yml
+**/application-local.yaml
+**/application-*.local.yml
+**/application-*.local.yaml

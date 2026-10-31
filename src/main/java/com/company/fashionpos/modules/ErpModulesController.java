@@ -45,11 +45,6 @@ public class ErpModulesController {
     return erpModulesService.accountingSummary(authenticatedUserService.current(principal));
   }
 
-  @GetMapping("/etims/summary")
-  public ModuleSummary etimsSummary(Principal principal) {
-    return erpModulesService.etimsSummary(authenticatedUserService.current(principal));
-  }
-
   @GetMapping("/notifications/summary")
   public ModuleSummary notificationsSummary(Principal principal) {
     return erpModulesService.notificationsSummary(authenticatedUserService.current(principal));

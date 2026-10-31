@@ -21,7 +21,6 @@ public class InventoryService {
   private final InventoryRepository inventoryRepository;
   private final StockAdjustmentRepository stockAdjustmentRepository;
   private final StockIntakeRepository stockIntakeRepository;
-  private final StockTransferRepository stockTransferRepository;
   private final BranchRepository branchRepository;
   private final BranchService branchService;
   private final ProductRepository productRepository;
@@ -30,14 +29,12 @@ public class InventoryService {
       InventoryRepository inventoryRepository,
       StockAdjustmentRepository stockAdjustmentRepository,
       StockIntakeRepository stockIntakeRepository,
-      StockTransferRepository stockTransferRepository,
       BranchRepository branchRepository,
       BranchService branchService,
       ProductRepository productRepository) {
     this.inventoryRepository = inventoryRepository;
     this.stockAdjustmentRepository = stockAdjustmentRepository;
     this.stockIntakeRepository = stockIntakeRepository;
-    this.stockTransferRepository = stockTransferRepository;
     this.branchRepository = branchRepository;
     this.branchService = branchService;
     this.productRepository = productRepository;
@@ -155,55 +152,6 @@ public class InventoryService {
     return StockIntakeResponse.from(stockIntakeRepository.save(intake));
   }
 
-  @Transactional(readOnly = true)
-  public List<StockTransferResponse> listTransfers(AuthenticatedUser user) {
-    return stockTransferRepository.findWithinOrganization(user.organizationId()).stream()
-        .filter(
-            transfer ->
-                canAccessBranch(user, transfer.getSourceBranch().getId())
-                    || canAccessBranch(user, transfer.getDestinationBranch().getId()))
-        .map(StockTransferResponse::from)
-        .toList();
-  }
-
-  @Transactional
-  public StockTransferResponse transferStock(AuthenticatedUser user, StockTransferRequest request) {
-    requirePositive(request.quantity());
-    if (request.sourceBranchId().equals(request.destinationBranchId())) {
-      throw new IllegalArgumentException("Source and destination branches must be different");
-    }
-    branchService.requireBranchAccess(user, request.sourceBranchId());
-    branchService.requireBranchAccess(user, request.destinationBranchId());
-
-    ProductItem product = requireProduct(user, request.productId());
-    Branch sourceBranch = requireBranch(user, request.sourceBranchId());
-    Branch destinationBranch = requireBranch(user, request.destinationBranchId());
-    InventoryItem sourceItem =
-        inventoryRepository
-            .findForMutation(user.organizationId(), sourceBranch.getId(), product.getId())
-            .orElseThrow(
-                () -> new IllegalArgumentException("Source branch does not have this product"));
-    InventoryItem destinationItem =
-        getOrCreateInventory(product.getOrganization(), destinationBranch, product);
-
-    sourceItem.removeStock(request.quantity());
-    destinationItem.addStock(request.quantity());
-    inventoryRepository.save(sourceItem);
-    inventoryRepository.save(destinationItem);
-
-    StockTransfer transfer =
-        new StockTransfer(
-            UUID.randomUUID(),
-            product.getOrganization(),
-            sourceBranch,
-            destinationBranch,
-            product,
-            request.quantity(),
-            normalizeOptional(request.referenceNumber()),
-            normalizeOptional(request.notes()));
-    return StockTransferResponse.from(stockTransferRepository.save(transfer));
-  }
-
   private InventoryItem getOrCreateInventory(
       Organization organization, Branch branch, ProductItem product) {
     return inventoryRepository
@@ -212,9 +160,13 @@ public class InventoryService {
   }
 
   private ProductItem requireProduct(AuthenticatedUser user, UUID productId) {
-    return productRepository
-        .findWithinOrganization(productId, user.organizationId())
-        .orElseThrow(() -> new EntityNotFoundException("Product not found"));
+    ProductItem product =
+        productRepository
+            .findForMutation(productId, user.organizationId())
+            .orElseThrow(() -> new EntityNotFoundException("Product not found"));
+    if (!product.isSellable())
+      throw new IllegalArgumentException("Select an active simple product or exact variant");
+    return product;
   }
 
   private Branch requireBranch(AuthenticatedUser user, UUID branchId) {
@@ -224,7 +176,7 @@ public class InventoryService {
   }
 
   private static boolean canAccessBranch(AuthenticatedUser user, UUID branchId) {
-    return user.branchIds().isEmpty() || user.branchIds().contains(branchId);
+    return (!user.isCashier() && user.branchIds().isEmpty()) || user.branchIds().contains(branchId);
   }
 
   private static void requirePositive(int quantity) {
