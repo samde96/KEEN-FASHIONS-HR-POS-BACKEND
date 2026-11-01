@@ -1,6 +1,7 @@
 package com.company.fashionpos.delivery;
 
 import jakarta.validation.Valid;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -19,5 +20,10 @@ public class DocumentDeliveryController {
   @PostMapping("/email")
   public DocumentEmailResponse sendEmail(@Valid @RequestBody DocumentEmailRequest request) {
     return documentDeliveryService.sendEmail(request);
+  }
+
+  @GetMapping("/email/status")
+  public DocumentDeliveryService.EmailConfiguration emailStatus() {
+    return documentDeliveryService.configuration();
   }
 }

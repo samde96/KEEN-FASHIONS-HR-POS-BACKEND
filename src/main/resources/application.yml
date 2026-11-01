@@ -105,3 +105,5 @@ app:
     resend:
       api-key: ${RESEND_API_KEY:}
       from-email: ${RESEND_FROM_EMAIL:}
+  notifications:
+    scheduler-enabled: ${FASHIONPOS_NOTIFICATION_EMAIL_SCHEDULER_ENABLED:true}

@@ -85,6 +85,20 @@ public class DocumentDeliveryService {
     }
   }
 
+  public record EmailConfiguration(
+      String provider, boolean configured, String fromEmail, List<String> missingSettings) {}
+
+  public EmailConfiguration configuration() {
+    var missing = new java.util.ArrayList<String>();
+    if (!hasText(resendApiKey)) missing.add("RESEND_API_KEY");
+    if (!hasText(defaultFromEmail)) missing.add("RESEND_FROM_EMAIL");
+    return new EmailConfiguration(
+        "Resend",
+        missing.isEmpty(),
+        hasText(defaultFromEmail) ? defaultFromEmail.trim() : "",
+        List.copyOf(missing));
+  }
+
   public void sendSummary(String to, String subject, String message, String idempotencyKey) {
     String apiKey = requireConfigured(resendApiKey, "RESEND_API_KEY");
     String from = requireConfigured(defaultFromEmail, "RESEND_FROM_EMAIL");

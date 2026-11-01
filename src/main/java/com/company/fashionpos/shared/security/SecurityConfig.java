@@ -133,6 +133,8 @@ public class SecurityConfig {
                     .hasAnyAuthority(ADMIN_MANAGE, COMMERCIAL_MANAGE, CRM_MANAGE)
                     .requestMatchers(HttpMethod.POST, "/api/v1/document-delivery/email")
                     .hasAnyAuthority(ADMIN_MANAGE, COMMERCIAL_MANAGE, PROCUREMENT_MANAGE)
+                    .requestMatchers(HttpMethod.GET, "/api/v1/document-delivery/email/status")
+                    .hasAuthority(ADMIN_MANAGE)
                     .requestMatchers(HttpMethod.GET, "/api/v1/crm/**")
                     .hasAnyAuthority(ADMIN_MANAGE, CRM_MANAGE, SALES_VIEW, REPORTS_VIEW)
                     .requestMatchers(HttpMethod.GET, "/api/v1/commercial/**")

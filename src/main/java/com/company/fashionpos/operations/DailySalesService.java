@@ -232,15 +232,19 @@ public class DailySalesService {
             == 0) continue;
       } else if (!p.recipientIds().contains(id)) continue;
       for (String channel : List.of("IN_APP", "EMAIL")) {
-        if ((channel.equals("IN_APP") && !p.inAppEnabled())
+        if ((channel.equals("IN_APP") && !p.inAppEnabled() && !p.emailEnabled())
             || (channel.equals("EMAIL") && !p.emailEnabled())) continue;
         jdbc.update(
-            "insert into daily_summary_deliveries (id,report_id,user_id,channel,batch_key) values (?,?,?,?,?) on conflict (report_id,user_id,channel,batch_key) do nothing",
+            "insert into daily_summary_deliveries (id,report_id,user_id,channel,batch_key,to_email,uses_notification_email) values (?,?,?,?,?,?,?) on conflict do nothing",
             UUID.randomUUID(),
             report.id(),
             id,
             channel,
-            key);
+            key,
+            channel.equals("EMAIL")
+                ? p.notificationEmail().isBlank() ? recipient.get("email") : p.notificationEmail()
+                : null,
+            channel.equals("EMAIL") && !p.notificationEmail().isBlank());
       }
     }
   }

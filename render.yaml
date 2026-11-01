@@ -34,6 +34,10 @@ services:
         value: "None"
       - key: FASHIONPOS_LOGIN_RATE_LIMIT_ENABLED
         value: "true"
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
 
 databases:
   - name: keen-fashion-pos-db

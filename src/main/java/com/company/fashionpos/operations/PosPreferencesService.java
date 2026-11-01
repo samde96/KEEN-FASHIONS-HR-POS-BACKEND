@@ -39,7 +39,8 @@ public class PosPreferencesService {
                     rs.getObject("long_entry_minutes") == null
                         ? 10
                         : rs.getInt("long_entry_minutes"),
-                    rs.getString("time_zone")),
+                    rs.getString("time_zone"),
+                    rs.getString("notification_email")),
             organizationId)
         .get(0);
   }
@@ -71,11 +72,14 @@ public class PosPreferencesService {
     }
     jdbc.update(
         """
-        insert into pos_preferences (organization_id,daily_summary_enabled,in_app_enabled,email_enabled,recipient_ids,inactivity_minutes,long_entry_minutes)
-        values (?,?,?,?,?,?,?) on conflict (organization_id) do update set daily_summary_enabled=excluded.daily_summary_enabled,
+        insert into pos_preferences (organization_id,daily_summary_enabled,in_app_enabled,email_enabled,recipient_ids,inactivity_minutes,long_entry_minutes,notification_email)
+        values (?,?,?,?,?,?,?,?) on conflict (organization_id) do update set daily_summary_enabled=excluded.daily_summary_enabled,
         in_app_enabled=excluded.in_app_enabled,email_enabled=excluded.email_enabled,recipient_ids=excluded.recipient_ids,
         inactivity_minutes=excluded.inactivity_minutes,long_entry_minutes=excluded.long_entry_minutes,
-        schedule_started_at=case when not pos_preferences.daily_summary_enabled and excluded.daily_summary_enabled then now() else pos_preferences.schedule_started_at end
+        schedule_started_at=case when not pos_preferences.daily_summary_enabled and excluded.daily_summary_enabled then now() else pos_preferences.schedule_started_at end,
+        notification_email_started_at=case when (not pos_preferences.email_enabled and excluded.email_enabled)
+          or pos_preferences.notification_email<>excluded.notification_email then now() else pos_preferences.notification_email_started_at end,
+        notification_email=excluded.notification_email
         """,
         user.organizationId(),
         p.dailySummaryEnabled(),
@@ -83,7 +87,8 @@ public class PosPreferencesService {
         p.emailEnabled(),
         encode(p.recipientIds()),
         p.inactivityMinutes(),
-        p.longEntryMinutes());
+        p.longEntryMinutes(),
+        p.notificationEmail());
     jdbc.update(
         "update organizations set time_zone=?, updated_at=now(), version=version+1 where id=?",
         p.timeZone(),

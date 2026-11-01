@@ -35,6 +35,7 @@ import org.springframework.web.server.ResponseStatusException;
 @SpringBootTest(
     properties = {
       "app.daily-summary.scheduler-enabled=false",
+      "app.notifications.scheduler-enabled=false",
       "app.mpesa.scheduler-enabled=false",
       "app.security.admin-email=mpesa-bootstrap@example.test",
       "app.security.admin-password=test-password-only",

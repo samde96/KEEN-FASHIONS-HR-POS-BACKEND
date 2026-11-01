@@ -26,7 +26,10 @@ public class DailySummaryDelivery {
     var rows =
         jdbc.queryForList(
             """
-        select d.*,r.organization_id,r.branch_id,r.snapshot from daily_summary_deliveries d join daily_sales_reports r on r.id=d.report_id
+        select d.*,r.organization_id,r.branch_id,r.snapshot,
+          coalesce(p.notification_email,'') as notification_email,coalesce(p.email_enabled,false) as email_enabled
+        from daily_summary_deliveries d join daily_sales_reports r on r.id=d.report_id
+        left join pos_preferences p on p.organization_id=r.organization_id
         where d.status='PENDING' and d.next_attempt_at<=now() order by d.next_attempt_at limit 1 for update of d skip locked
         """);
     if (rows.isEmpty()) return false;
@@ -50,25 +53,61 @@ public class DailySummaryDelivery {
     }
     DailySalesReport report = reports.decode((String) row.get("snapshot"));
     String title = "Daily Sales Summary — " + report.businessDate() + " — " + report.branchName();
+    if (title.length() > 160) title = title.substring(0, 160);
     String message = message(report);
+    String recipientEmail = (String) row.get("to_email");
+    if (recipientEmail == null) recipientEmail = (String) recipient.get().get("email");
+    if (row.get("channel").equals("EMAIL")) {
+      boolean usesSharedEmail = Boolean.TRUE.equals(row.get("uses_notification_email"));
+      String currentEmail = (String) row.get("notification_email");
+      boolean recipientChanged =
+          usesSharedEmail
+              ? !recipientEmail.equals(currentEmail)
+              : !currentEmail.isBlank() || !recipientEmail.equals(recipient.get().get("email"));
+      if (!Boolean.TRUE.equals(row.get("email_enabled")) || recipientChanged) {
+        jdbc.update(
+            "update daily_summary_deliveries set status='FAILED',last_error=? where id=?",
+            "Email settings or notification recipient changed",
+            id);
+        return true;
+      }
+      jdbc.update(
+          "update daily_summary_deliveries set to_email=? where id=? and to_email is null",
+          recipientEmail,
+          id);
+    }
     int attempts = ((Number) row.get("attempts")).intValue() + 1;
     try {
-      if (row.get("channel").equals("IN_APP")) {
-        jdbc.update(
-            """
+      UUID inboxId = id;
+      if (row.get("channel").equals("EMAIL")) {
+        var inApp =
+            jdbc.queryForList(
+                "select id from daily_summary_deliveries where report_id=? and user_id=? and batch_key=? and channel='IN_APP'",
+                UUID.class,
+                row.get("report_id"),
+                user,
+                row.get("batch_key"));
+        inboxId =
+            inApp.isEmpty()
+                ? UUID.nameUUIDFromBytes(
+                    ("daily-summary/in-app/" + id)
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8))
+                : inApp.get(0);
+      }
+      jdbc.update(
+          """
             insert into notifications (id,organization_id,branch_id,user_id,notification_type,title,message,source_module,source_record_id,status)
             values (?,?,?,?,'DAILY_SALES_SUMMARY',?,?,'reports',?,'UNREAD') on conflict (id) do nothing
             """,
-            id,
-            org,
-            branch,
-            user,
-            title.length() > 160 ? title.substring(0, 160) : title,
-            message,
-            report.id());
-      } else
-        email.sendSummary(
-            (String) recipient.get().get("email"), title, message, "daily-summary/" + id);
+          inboxId,
+          org,
+          branch,
+          user,
+          title,
+          message,
+          report.id());
+      if (row.get("channel").equals("EMAIL"))
+        email.sendSummary(recipientEmail, title, message, "daily-summary/" + id);
       jdbc.update(
           "update daily_summary_deliveries set status='SENT',attempts=?,sent_at=now(),last_error=null where id=?",
           attempts,

@@ -30,6 +30,7 @@ import org.springframework.test.web.servlet.MockMvc;
 @SpringBootTest(
     properties = {
       "app.daily-summary.scheduler-enabled=false",
+      "app.notifications.scheduler-enabled=false",
       "app.security.admin-email=cashier-test@example.test",
       "app.security.admin-password=test-password-only"
     })

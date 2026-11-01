@@ -20,6 +20,38 @@ mvn -B -ntp package
 
 ## Render deployment
 
+### Notification emails with Resend
+
+Configure `RESEND_API_KEY` and `RESEND_FROM_EMAIL` in the backend's private `.env` file locally, or
+in Render environment settings. The sender must use a domain verified in Resend, for example
+`KEEN Fashions <notifications@yourdomain.com>`. Restart the backend after updating its environment.
+Never put the API key in frontend configuration. See [Resend's domain setup](https://resend.com/docs/dashboard/domains/introduction).
+
+In **Settings → Notifications, sales summaries & stock reminders**, enable **Email a copy of system
+notifications** and save. Settings shows whether both server values are configured; it does not
+validate the key or domain with Resend. The system inbox remains available if email delivery fails.
+Daily summary emails always have a matching inbox notification. Daily summary recipient selections
+apply to those summaries; other notification copies follow the active users authorized to see each
+alert in the inbox, respecting organization and shop access.
+
+Set **Notification recipient email** in the same Settings panel to route notification emails and
+daily summaries to a shared business inbox. The address is validated and saved for this business.
+Leave it blank to use each recipient's account email. A shared inbox receives one email per alert
+or daily summary, even when multiple users receive the corresponding system notification.
+Changing this address applies to new notifications; queued emails to the previous destination are
+not redirected, and older alerts are not sent to the new address.
+
+Email copies start with new alerts after enabling the setting. Old inbox alerts are not bulk sent.
+Delivery workers check every 15 seconds, persist retries, and reuse the same payload and
+[Resend idempotency key](https://resend.com/docs/dashboard/emails/idempotency-keys). Automatic retries
+stop after 23 hours, within the provider's 24-hour deduplication window. `SENT` means Resend accepted
+the request; this does not confirm delivery to the recipient's mailbox.
+
+`FASHIONPOS_NOTIFICATION_EMAIL_SCHEDULER_ENABLED=false` pauses general notification email processing.
+Daily summaries use `FASHIONPOS_DAILY_SUMMARY_SCHEDULER_ENABLED`. Keep both enabled for normal use.
+
+### Deploy the backend
+
 1. Push this folder's repository to GitHub, including `Dockerfile`, `.dockerignore`, `pom.xml`, `src/`, and `render.yaml`.
 2. In Render, create a Blueprint from the backend repository. Use `render.yaml` at the repository root. Leave Root Directory empty because this repository already contains the backend at its root.
 3. Provide the values requested by the Blueprint:

@@ -23,6 +23,7 @@ import org.springframework.test.context.DynamicPropertySource;
 @SpringBootTest(
     properties = {
       "app.daily-summary.scheduler-enabled=false",
+      "app.notifications.scheduler-enabled=false",
       "app.mpesa.enabled=false",
       "app.mpesa.scheduler-enabled=false",
       "app.security.admin-email=offline-bootstrap@example.test",
