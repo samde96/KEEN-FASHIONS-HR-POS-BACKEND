@@ -33,4 +33,11 @@ public class OrganizationController {
     return organizationService.updateVatSettings(
         authenticatedUserService.current(principal), request);
   }
+
+  @PutMapping("/current/hotel-reports-settings")
+  public OrganizationResponse updateHotelReportsSettings(
+      @Valid @RequestBody HotelReportsSettingsRequest request, Principal principal) {
+    return organizationService.updateHotelReportsSettings(
+        authenticatedUserService.current(principal), request);
+  }
 }

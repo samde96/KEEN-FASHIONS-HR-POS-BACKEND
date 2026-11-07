@@ -93,12 +93,40 @@ public class SecurityConfig {
                     .permitAll()
                     .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout")
                     .permitAll()
+                    .requestMatchers(SecurityConfig::restrictedHotelSalesRequest)
+                    .denyAll()
                     .requestMatchers(HttpMethod.POST, "/api/v1/mpesa/callback/**")
                     .permitAll()
                     .requestMatchers("/api/v1/mpesa/**")
                     .hasAnyAuthority(ADMIN_MANAGE, POS_SELL)
                     .requestMatchers("/api/v1/offline/**")
                     .authenticated()
+                    .requestMatchers("/api/v1/hr/me/**")
+                    .authenticated()
+                    .requestMatchers("/api/v1/hr/**")
+                    .hasRole("ADMIN")
+                    .requestMatchers("/api/v1/payroll/**")
+                    .hasRole("ADMIN")
+                    .requestMatchers(HttpMethod.GET, "/api/v1/hotel/reports")
+                    .hasAnyAuthority(ADMIN_MANAGE, "hotel:reports")
+                    .requestMatchers(
+                        HttpMethod.GET, "/api/v1/hotel/checkout", "/api/v1/hotel/orders/*")
+                    .hasAnyAuthority(ADMIN_MANAGE, "hotel:manage", "hotel:view", "hotel:sell")
+                    .requestMatchers(
+                        "/api/v1/hotel/waiters",
+                        "/api/v1/hotel/waiters/**",
+                        "/api/v1/hotel/receipt-settings")
+                    .hasAuthority(ADMIN_MANAGE)
+                    .requestMatchers(
+                        HttpMethod.POST,
+                        "/api/v1/hotel/orders",
+                        "/api/v1/hotel/orders/*/payment",
+                        "/api/v1/hotel/orders/*/cancel")
+                    .hasAnyAuthority(ADMIN_MANAGE, "hotel:manage", "hotel:sell")
+                    .requestMatchers(HttpMethod.GET, "/api/v1/hotel/**")
+                    .hasAnyAuthority(ADMIN_MANAGE, "hotel:view", "hotel:manage")
+                    .requestMatchers("/api/v1/hotel/**")
+                    .hasAnyAuthority(ADMIN_MANAGE, "hotel:manage")
                     .requestMatchers(
                         HttpMethod.GET,
                         "/api/v1/me",
@@ -109,6 +137,9 @@ public class SecurityConfig {
                         "/api/v1/inventory")
                     .authenticated()
                     .requestMatchers(HttpMethod.PUT, "/api/v1/organization/current/vat-settings")
+                    .hasAuthority(ADMIN_MANAGE)
+                    .requestMatchers(
+                        HttpMethod.PUT, "/api/v1/organization/current/hotel-reports-settings")
                     .hasAuthority(ADMIN_MANAGE)
                     .requestMatchers(HttpMethod.PUT, "/api/v1/pos-preferences")
                     .hasAuthority(ADMIN_MANAGE)
@@ -215,6 +246,27 @@ public class SecurityConfig {
   AuthenticationManager authenticationManager(AuthenticationConfiguration configuration)
       throws Exception {
     return configuration.getAuthenticationManager();
+  }
+
+  private static boolean restrictedHotelSalesRequest(
+      jakarta.servlet.http.HttpServletRequest request) {
+    var authentication =
+        org.springframework.security.core.context.SecurityContextHolder.getContext()
+            .getAuthentication();
+    if (authentication == null
+        || authentication.getAuthorities().stream()
+            .noneMatch(a -> a.getAuthority().equals("ROLE_HOTEL_SALES_MANAGER"))) return false;
+    String path = request.getRequestURI().substring(request.getContextPath().length());
+    if (!path.startsWith("/api/")) return false;
+    return !(path.startsWith("/api/v1/auth/")
+        || Set.of(
+                "/api/v1/me",
+                "/api/v1/organization/current",
+                "/api/v1/branches",
+                "/api/v1/hotel/checkout",
+                "/api/v1/hotel/orders")
+            .contains(path)
+        || path.startsWith("/api/v1/hotel/orders/"));
   }
 
   @Bean

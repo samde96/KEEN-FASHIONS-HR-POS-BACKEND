@@ -10,6 +10,7 @@ public record OrganizationResponse(
     String timeZone,
     String taxRegistrationNumber,
     VatCategory defaultProductVatCategory,
+    boolean showHotelReports,
     OrganizationStatus status) {
 
   public static OrganizationResponse from(Organization organization) {
@@ -20,6 +21,7 @@ public record OrganizationResponse(
         organization.getTimeZone(),
         organization.getTaxRegistrationNumber(),
         organization.getDefaultProductVatCategory(),
+        organization.isShowHotelReports(),
         organization.getStatus());
   }
 }

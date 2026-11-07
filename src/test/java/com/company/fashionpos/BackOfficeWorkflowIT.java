@@ -328,6 +328,16 @@ class BackOfficeWorkflowIT {
     JsonNode permissions = getJson("/api/v1/permissions");
     String posSellPermissionId = permissionIdFor(permissions, "pos:sell");
     String reportsViewPermissionId = permissionIdFor(permissions, "reports:view");
+    JsonNode registeredRoles = getJson("/api/v1/roles");
+    JsonNode waiterRole = null;
+    for (JsonNode registeredRole : registeredRoles) {
+      if ("WAITER".equals(registeredRole.get("key").asText())) {
+        waiterRole = registeredRole;
+        break;
+      }
+    }
+    assertThat(waiterRole).isNotNull();
+    assertThat(textValues(waiterRole.get("permissionCodes"))).containsExactly("hotel:sell");
 
     JsonNode role =
         postJson(
@@ -366,6 +376,25 @@ class BackOfficeWorkflowIT {
 
     assertThat(textValues(staffUser.get("permissionCodes")))
         .containsExactly("pos:sell", "reports:view");
+
+    JsonNode waiterUser =
+        postJson(
+            "/api/v1/users",
+            """
+            {
+              "email": "waiter@test.local",
+              "password": "waiter-password",
+              "displayName": "Hotel Waiter",
+              "status": "ACTIVE",
+              "roleIds": ["%s"],
+              "branchIds": ["%s"]
+            }
+            """
+                .formatted(waiterRole.get("id").asText(), branchId),
+            201);
+
+    assertThat(textValues(waiterUser.get("roleNames"))).containsExactly("Waiter");
+    assertThat(textValues(waiterUser.get("permissionCodes"))).containsExactly("hotel:sell");
   }
 
   private JsonNode createBranch(String name, String code, String timeZone) throws Exception {

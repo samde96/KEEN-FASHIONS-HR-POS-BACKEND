@@ -92,7 +92,8 @@ class StaffServiceTest {
                     authenticatedUser(organizationId),
                     new RoleRequest("Owner", "OWNER", "Legacy owner access", Set.of())))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Only Admin, Shop Manager, and Cashier roles are supported");
+        .hasMessage(
+            "Supported roles are Admin, Shop Manager, Cashier, Hotel Sales Manager, and Waiter");
   }
 
   private static StaffService service(

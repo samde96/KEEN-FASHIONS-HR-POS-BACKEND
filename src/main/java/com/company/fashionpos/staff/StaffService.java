@@ -25,10 +25,16 @@ public class StaffService {
   private static final String ADMIN_ROLE_KEY = "ADMIN";
   private static final String SHOP_MANAGER_ROLE_KEY = "SHOP_MANAGER";
   private static final String CASHIER_ROLE_KEY = "CASHIER";
+  private static final String WAITER_ROLE_KEY = "WAITER";
   private static final Set<String> CASHIER_PERMISSIONS =
       Set.of("pos:sell", "expenses:create", "shifts:manage");
   private static final Set<String> SUPPORTED_ROLE_KEYS =
-      Set.of(ADMIN_ROLE_KEY, SHOP_MANAGER_ROLE_KEY, CASHIER_ROLE_KEY);
+      Set.of(
+          ADMIN_ROLE_KEY,
+          SHOP_MANAGER_ROLE_KEY,
+          CASHIER_ROLE_KEY,
+          "HOTEL_SALES_MANAGER",
+          WAITER_ROLE_KEY);
   private static final String PROFIT_VIEW_PERMISSION = "profit:view";
 
   private final UserAccountRepository userAccountRepository;
@@ -56,6 +62,7 @@ public class StaffService {
   @Transactional
   public List<RoleResponse> listRoles(AuthenticatedUser user) {
     ensureCashierRole(user.organizationId());
+    ensureHotelRoles(user.organizationId());
     return roleRepository.findWithinOrganization(user.organizationId()).stream()
         .filter(role -> SUPPORTED_ROLE_KEYS.contains(role.getKey()))
         .map(this::toRoleResponse)
@@ -77,6 +84,40 @@ public class StaffService {
         select r.id,p.id from roles r cross join permissions p
         where r.organization_id=? and r.role_key='CASHIER'
           and p.code in ('pos:sell','expenses:create','shifts:manage') on conflict do nothing
+        """,
+        organizationId);
+  }
+
+  private void ensureHotelRoles(UUID organizationId) {
+    jdbcTemplate.update(
+        """
+        insert into roles(id,organization_id,name,role_key,description)
+        select gen_random_uuid(),o.id,'Hotel Sales Manager','HOTEL_SALES_MANAGER','Hotel sales counter and receipts' from organizations o
+        where o.id=? on conflict (organization_id,role_key) do nothing
+        """,
+        organizationId);
+    jdbcTemplate.update(
+        """
+        insert into roles(id,organization_id,name,role_key,description)
+        select gen_random_uuid(),o.id,'Waiter','WAITER','Hotel restaurant table service and orders'
+        from organizations o
+        where o.id=? on conflict (organization_id,role_key) do nothing
+        """,
+        organizationId);
+    jdbcTemplate.update(
+        """
+        insert into role_permissions(role_id,permission_id)
+        select r.id,p.id from roles r cross join permissions p where r.organization_id=?
+        and r.role_key='HOTEL_SALES_MANAGER' and p.code='hotel:sell'
+        on conflict do nothing
+        """,
+        organizationId);
+    jdbcTemplate.update(
+        """
+        insert into role_permissions(role_id,permission_id)
+        select r.id,p.id from roles r cross join permissions p where r.organization_id=?
+        and r.role_key='WAITER' and p.code='hotel:sell'
+        on conflict do nothing
         """,
         organizationId);
   }
@@ -284,6 +325,19 @@ public class StaffService {
     if (cashier && (roleIds.size() != 1 || branchIds.isEmpty())) {
       throw new IllegalArgumentException("Cashier must be assigned alone and to at least one shop");
     }
+    boolean hotelStaff =
+        roleIds.stream()
+            .anyMatch(
+                roleId ->
+                    jdbcTemplate
+                        .queryForList("select role_key from roles where id=?", String.class, roleId)
+                        .stream()
+                        .anyMatch(
+                            key ->
+                                key.equals("HOTEL_SALES_MANAGER") || key.equals(WAITER_ROLE_KEY)));
+    if (hotelStaff && (branchIds.isEmpty() || roleIds.size() != 1))
+      throw new IllegalArgumentException(
+          "Hotel Sales Manager and Waiter must be assigned alone and to at least one hotel location");
 
     for (UUID branchId : branchIds) {
       if (!branchRepository.existsWithinOrganization(branchId, user.organizationId())) {
@@ -335,6 +389,20 @@ public class StaffService {
 
   private void assignRolePermissions(
       UUID roleId, String roleKey, Set<UUID> requestedPermissionIds) {
+    if (roleKey.equals(WAITER_ROLE_KEY)
+        && (requestedPermissionIds == null
+            || requestedPermissionIds.size() != 1
+            || requestedPermissionIds.stream()
+                .anyMatch(id -> !permissionHasCode(id, "hotel:sell")))) {
+      throw new IllegalArgumentException("Waiter permissions are limited to hotel sales");
+    }
+    if (roleKey.equals("HOTEL_SALES_MANAGER")
+        && (requestedPermissionIds == null
+            || requestedPermissionIds.size() != 1
+            || requestedPermissionIds.stream()
+                .anyMatch(id -> !permissionHasCode(id, "hotel:sell"))))
+      throw new IllegalArgumentException(
+          "Hotel Sales Manager permissions are limited to hotel sales");
     if (CASHIER_ROLE_KEY.equals(roleKey)
         && (requestedPermissionIds == null
             || requestedPermissionIds.size() != CASHIER_PERMISSIONS.size()
@@ -570,7 +638,7 @@ public class StaffService {
   private static void requireSupportedRoleKey(String key) {
     if (!SUPPORTED_ROLE_KEYS.contains(key)) {
       throw new IllegalArgumentException(
-          "Only Admin, Shop Manager, and Cashier roles are supported");
+          "Supported roles are Admin, Shop Manager, Cashier, Hotel Sales Manager, and Waiter");
     }
   }
 
@@ -579,7 +647,7 @@ public class StaffService {
         jdbcTemplate.queryForList("select role_key from roles where id = ?", String.class, roleId);
     if (roleKeys.isEmpty() || !SUPPORTED_ROLE_KEYS.contains(roleKeys.get(0))) {
       throw new IllegalArgumentException(
-          "Only Admin, Shop Manager, and Cashier roles are supported");
+          "Supported roles are Admin, Shop Manager, Cashier, Hotel Sales Manager, and Waiter");
     }
   }
 

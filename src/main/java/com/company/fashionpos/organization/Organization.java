@@ -35,6 +35,9 @@ public class Organization {
   @Column(name = "default_product_vat_category", nullable = false, length = 1)
   private VatCategory defaultProductVatCategory;
 
+  @Column(name = "show_hotel_reports", nullable = false)
+  private boolean showHotelReports = true;
+
   @Enumerated(EnumType.STRING)
   @Column(nullable = false, length = 32)
   private OrganizationStatus status;
@@ -105,6 +108,10 @@ public class Organization {
     return defaultProductVatCategory;
   }
 
+  public boolean isShowHotelReports() {
+    return showHotelReports;
+  }
+
   public OrganizationStatus getStatus() {
     return status;
   }
@@ -112,5 +119,9 @@ public class Organization {
   public void updateVatSettings(VatCategory defaultProductVatCategory) {
     this.defaultProductVatCategory =
         defaultProductVatCategory == null ? VatCategory.A : defaultProductVatCategory;
+  }
+
+  public void updateHotelReportsSettings(boolean showHotelReports) {
+    this.showHotelReports = showHotelReports;
   }
 }

@@ -3,7 +3,12 @@ package com.company.fashionpos.branch;
 import java.util.UUID;
 
 public record BranchResponse(
-    UUID id, String name, String code, String timeZone, BranchStatus status) {
+    UUID id,
+    String name,
+    String code,
+    String timeZone,
+    BranchStatus status,
+    BranchType branchType) {
 
   public static BranchResponse from(Branch branch) {
     return new BranchResponse(
@@ -11,6 +16,7 @@ public record BranchResponse(
         branch.getName(),
         branch.getCode(),
         branch.getTimeZone(),
-        branch.getStatus());
+        branch.getStatus(),
+        branch.getBranchType());
   }
 }

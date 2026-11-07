@@ -38,6 +38,10 @@ public record AuthenticatedUser(
     return roleKeys.contains("CASHIER") && !isAdmin();
   }
 
+  public boolean isHotelSalesManager() {
+    return roleKeys.contains("HOTEL_SALES_MANAGER") && !isAdmin();
+  }
+
   public boolean canViewProfit() {
     return isAdmin();
   }

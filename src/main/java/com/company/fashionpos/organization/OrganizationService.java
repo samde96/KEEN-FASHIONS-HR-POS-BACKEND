@@ -27,6 +27,14 @@ public class OrganizationService {
     return OrganizationResponse.from(organization);
   }
 
+  @Transactional
+  public OrganizationResponse updateHotelReportsSettings(
+      AuthenticatedUser user, HotelReportsSettingsRequest request) {
+    Organization organization = requireOrganization(user);
+    organization.updateHotelReportsSettings(request.showHotelReports());
+    return OrganizationResponse.from(organization);
+  }
+
   private Organization requireOrganization(AuthenticatedUser user) {
     Organization organization =
         organizationRepository

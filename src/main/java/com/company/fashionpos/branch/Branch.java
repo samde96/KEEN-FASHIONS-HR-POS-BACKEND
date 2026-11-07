@@ -39,6 +39,10 @@ public class Branch {
   @Column(nullable = false, length = 32)
   private BranchStatus status;
 
+  @Enumerated(EnumType.STRING)
+  @Column(name = "branch_type", nullable = false, length = 16)
+  private BranchType branchType;
+
   @Column(name = "created_at", nullable = false)
   private Instant createdAt;
 
@@ -52,12 +56,23 @@ public class Branch {
   protected Branch() {}
 
   public Branch(UUID id, Organization organization, String name, String code, String timeZone) {
+    this(id, organization, name, code, timeZone, BranchType.SHOP);
+  }
+
+  public Branch(
+      UUID id,
+      Organization organization,
+      String name,
+      String code,
+      String timeZone,
+      BranchType branchType) {
     this.id = id;
     this.organization = organization;
     this.name = name;
     this.code = code;
     this.timeZone = timeZone;
     this.status = BranchStatus.ACTIVE;
+    this.branchType = branchType == null ? BranchType.SHOP : branchType;
   }
 
   @PrePersist
@@ -85,6 +100,12 @@ public class Branch {
     this.status = status;
   }
 
+  public void updateDetails(
+      String name, String code, String timeZone, BranchStatus status, BranchType branchType) {
+    updateDetails(name, code, timeZone, status);
+    this.branchType = branchType == null ? BranchType.SHOP : branchType;
+  }
+
   public UUID getId() {
     return id;
   }
@@ -107,5 +128,9 @@ public class Branch {
 
   public BranchStatus getStatus() {
     return status;
+  }
+
+  public BranchType getBranchType() {
+    return branchType;
   }
 }

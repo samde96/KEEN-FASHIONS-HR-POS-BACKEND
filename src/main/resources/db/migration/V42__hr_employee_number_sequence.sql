@@ -1,0 +1,1 @@
+CREATE SEQUENCE employee_number_sequence START WITH 1 INCREMENT BY 1;

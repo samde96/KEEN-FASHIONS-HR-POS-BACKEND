@@ -6,6 +6,7 @@ import static org.hamcrest.Matchers.not;
 import static org.hamcrest.text.IsEmptyString.emptyString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -132,6 +133,13 @@ class AuthenticationSecurityTest {
             .andReturn();
 
     assertThat(result.getResponse().getCookie("XSRF-TOKEN")).isNotNull();
+  }
+
+  @Test
+  void hrApiRequiresTheAdminRole() throws Exception {
+    mockMvc
+        .perform(get("/api/v1/hr/employees").with(user("owner").roles("OWNER")))
+        .andExpect(status().isForbidden());
   }
 
   @Test
