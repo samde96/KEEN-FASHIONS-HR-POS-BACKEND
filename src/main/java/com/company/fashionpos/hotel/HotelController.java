@@ -78,6 +78,18 @@ public class HotelController {
     return hotel.saveMenuItem(users.current(principal), id, request);
   }
 
+  @GetMapping("/recipes")
+  public List<Recipe> recipes(@RequestParam UUID branchId, Principal principal) {
+    return hotel.recipes(users.current(principal), branchId);
+  }
+
+  @PostMapping("/menu-items/{id}/recipes")
+  @ResponseStatus(HttpStatus.CREATED)
+  public Recipe createRecipeVersion(
+      @PathVariable UUID id, @Valid @RequestBody RecipeRequest request, Principal principal) {
+    return hotel.saveRecipe(users.current(principal), id, request);
+  }
+
   @PostMapping("/rooms")
   @ResponseStatus(HttpStatus.CREATED)
   public Room createRoom(@Valid @RequestBody RoomRequest request, Principal principal) {
@@ -126,6 +138,15 @@ public class HotelController {
   @GetMapping("/bookings/{id}/orders")
   public List<FoodOrder> bookingOrders(@PathVariable UUID id, Principal principal) {
     return hotel.bookingOrders(users.current(principal), id);
+  }
+
+  @GetMapping("/sales-history")
+  public List<SalesHistoryOrder> salesHistory(
+      @RequestParam LocalDate from,
+      @RequestParam LocalDate to,
+      @RequestParam(required = false) UUID branchId,
+      Principal principal) {
+    return hotel.salesHistory(users.current(principal), branchId, from, to);
   }
 
   @PostMapping("/items")
@@ -202,6 +223,19 @@ public class HotelController {
   @PostMapping("/orders/{id}/cancel")
   public FoodOrder cancelOrder(@PathVariable UUID id, Principal principal) {
     return hotel.cancelOrder(users.current(principal), id);
+  }
+
+  @GetMapping("/kitchen")
+  public List<KitchenTicket> kitchen(@RequestParam UUID branchId, Principal principal) {
+    return hotel.kitchenOrders(users.current(principal), branchId);
+  }
+
+  @PostMapping("/orders/{id}/preparations")
+  public KitchenTicket prepareOrder(
+      @PathVariable UUID id,
+      @Valid @RequestBody KitchenPreparationRequest request,
+      Principal principal) {
+    return hotel.prepareOrder(users.current(principal), id, request);
   }
 
   @GetMapping("/reports")

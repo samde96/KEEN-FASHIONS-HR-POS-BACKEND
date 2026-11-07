@@ -606,6 +606,216 @@ class HotelWorkflowIT {
   }
 
   @Test
+  void versionsRecipesAndEstimatesIngredientCostUsingReceiptCostsAndUnitConversions() {
+    Item beef =
+        hotel.saveItem(
+            admin,
+            null,
+            new ItemRequest(
+                branch, "Beef", "INGREDIENT", "kg", false, BigDecimal.ZERO, BigDecimal.ZERO, true));
+    hotel.adjustStock(
+        admin,
+        beef.id(),
+        new StockRequest(
+            UUID.randomUUID(),
+            new BigDecimal("10"),
+            "RECEIPT",
+            "Supplier delivery",
+            new BigDecimal("500")));
+    MenuItem stew =
+        hotel.saveMenuItem(
+            admin,
+            null,
+            new MenuItemRequest(
+                branch, "Beef stew", "Main meals", "", new BigDecimal("350"), true));
+    RecipeRequest firstVersion =
+        new RecipeRequest(
+            UUID.randomUUID(),
+            "1 serving",
+            List.of(new RecipeIngredientRequest(beef.id(), new BigDecimal("200"), "g", false)));
+
+    Recipe first = hotel.saveRecipe(admin, stew.id(), firstVersion);
+
+    assertThat(first.version()).isEqualTo(1);
+    assertThat(first.estimatedCost()).isEqualByComparingTo("100.00");
+    assertThat(first.contribution()).isEqualByComparingTo("250.00");
+    assertThat(first.ingredientCostPercent()).isEqualByComparingTo("28.57");
+    assertThat(first.ingredients().get(0).unitCost()).isEqualByComparingTo("500");
+
+    hotel.adjustStock(
+        admin,
+        beef.id(),
+        new StockRequest(
+            UUID.randomUUID(),
+            new BigDecimal("10"),
+            "RECEIPT",
+            "Price increase",
+            new BigDecimal("600")));
+    RecipeRequest secondVersion =
+        new RecipeRequest(
+            UUID.randomUUID(),
+            "1 serving",
+            List.of(new RecipeIngredientRequest(beef.id(), new BigDecimal("200"), "g", false)));
+
+    Recipe second = hotel.saveRecipe(admin, stew.id(), secondVersion);
+
+    assertThat(second.version()).isEqualTo(2);
+    assertThat(second.estimatedCost()).isEqualByComparingTo("110.00");
+    assertThat(second.ingredients().get(0).unitCost()).isEqualByComparingTo("550.0000");
+    assertThat(hotel.recipes(admin, branch)).extracting(Recipe::version).containsExactly(2, 1);
+    assertThatThrownBy(
+            () ->
+                hotel.saveRecipe(
+                    admin,
+                    stew.id(),
+                    new RecipeRequest(
+                        UUID.randomUUID(),
+                        "Invalid units",
+                        List.of(
+                            new RecipeIngredientRequest(beef.id(), BigDecimal.ONE, "ml", false)))))
+        .hasMessageContaining("Recipe units must match");
+  }
+
+  @Test
+  void consumesSnapshottedRecipeIngredientsOnceForPartialKitchenPreparation() throws Exception {
+    Item beef =
+        hotel.saveItem(
+            admin,
+            null,
+            new ItemRequest(
+                branch, "Beef", "INGREDIENT", "kg", false, BigDecimal.ZERO, BigDecimal.ZERO, true));
+    hotel.adjustStock(
+        admin,
+        beef.id(),
+        new StockRequest(
+            UUID.randomUUID(),
+            new BigDecimal("10"),
+            "RECEIPT",
+            "Supplier delivery",
+            new BigDecimal("500")));
+    MenuItem stew =
+        hotel.saveMenuItem(
+            admin,
+            null,
+            new MenuItemRequest(
+                branch, "Beef stew", "Main meals", "", new BigDecimal("350"), true));
+    hotel.saveRecipe(
+        admin,
+        stew.id(),
+        new RecipeRequest(
+            UUID.randomUUID(),
+            "1 serving",
+            List.of(new RecipeIngredientRequest(beef.id(), new BigDecimal("200"), "g", false))));
+    FoodOrder order =
+        hotel.sell(
+            admin,
+            new OrderRequest(
+                UUID.randomUUID(),
+                branch,
+                waiterId,
+                null,
+                "Walk-in",
+                "UNPAID",
+                "",
+                "DINE_IN",
+                "4",
+                "",
+                List.of(new OrderLineRequest(stew.id(), "FOOD", new BigDecimal("2")))));
+    UUID lineId = order.lines().get(0).lineId();
+    assertThat(order.kitchenStatus()).isEqualTo("PENDING");
+    assertThat(order.lines().get(0).recipeConfigured()).isTrue();
+    assertThat(
+            jdbc.queryForObject(
+                "select stock from hotel_items where id=?", BigDecimal.class, beef.id()))
+        .isEqualByComparingTo("10");
+
+    UUID kitchenUserId = UUID.randomUUID();
+    jdbc.update(
+        "insert into users(id,organization_id,email,display_name,status) values (?,?,?,'Kitchen','ACTIVE')",
+        kitchenUserId,
+        org,
+        "kitchen-" + kitchenUserId + "@test.local");
+    UUID kitchenRoleId =
+        staff.listRoles(admin).stream()
+            .filter(role -> role.key().equals("KITCHEN"))
+            .findFirst()
+            .orElseThrow()
+            .id();
+    jdbc.update(
+        "insert into user_roles(user_id,role_id) values (?,?)", kitchenUserId, kitchenRoleId);
+    jdbc.update(
+        "insert into user_branch_assignments(id,user_id,branch_id) values (?,?,?)",
+        UUID.randomUUID(),
+        kitchenUserId,
+        branch);
+    AuthenticatedUser kitchen =
+        new AuthenticatedUser(
+            kitchenUserId,
+            "kitchen-" + kitchenUserId + "@test.local",
+            "Kitchen",
+            org,
+            Set.of(branch),
+            Set.of("KITCHEN"),
+            Set.of("Kitchen"),
+            Set.of("hotel:kitchen"));
+    KitchenTicket ticket = hotel.kitchenOrders(kitchen, branch).get(0);
+    assertThat(ticket.lines()).hasSize(1);
+    assertThat(ticket.lines().get(0).recipeConfigured()).isTrue();
+    http.perform(
+            get("/api/v1/hotel/kitchen")
+                .param("branchId", branch.toString())
+                .with(
+                    user(kitchen.email()).authorities(new SimpleGrantedAuthority("hotel:kitchen"))))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$[0].reference").value(order.reference()));
+
+    KitchenPreparationRequest first =
+        new KitchenPreparationRequest(
+            UUID.randomUUID(), List.of(new KitchenPreparationLineRequest(lineId, BigDecimal.ONE)));
+    assertThat(hotel.prepareOrder(kitchen, order.id(), first).status()).isEqualTo("PREPARING");
+    hotel.prepareOrder(kitchen, order.id(), first);
+    assertThat(
+            jdbc.queryForObject(
+                "select stock from hotel_items where id=?", BigDecimal.class, beef.id()))
+        .isEqualByComparingTo("9.8");
+
+    KitchenPreparationRequest second =
+        new KitchenPreparationRequest(
+            UUID.randomUUID(), List.of(new KitchenPreparationLineRequest(lineId, BigDecimal.ONE)));
+    http.perform(
+            post("/api/v1/hotel/orders/{id}/preparations", order.id())
+                .with(
+                    user(kitchen.email()).authorities(new SimpleGrantedAuthority("hotel:kitchen")))
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(second)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("READY"));
+    assertThat(
+            jdbc.queryForObject(
+                "select stock from hotel_items where id=?", BigDecimal.class, beef.id()))
+        .isEqualByComparingTo("9.6");
+    assertThat(
+            jdbc.queryForObject(
+                "select count(*) from hotel_stock_movements where item_id=? and kind='KITCHEN'",
+                Integer.class,
+                beef.id()))
+        .isEqualTo(2);
+    assertThat(
+            jdbc.queryForObject(
+                "select sum(cost_value) from hotel_stock_movements where item_id=? and kind='KITCHEN'",
+                BigDecimal.class,
+                beef.id()))
+        .isEqualByComparingTo("200.00");
+
+    hotel.cancelOrder(admin, order.id());
+    assertThat(
+            jdbc.queryForObject(
+                "select stock from hotel_items where id=?", BigDecimal.class, beef.id()))
+        .isEqualByComparingTo("9.6");
+  }
+
+  @Test
   void enforcesDatesCapacityHousekeepingAndOccupiedRooms() {
     Room room = room("106");
     Booking stay = stay(room);

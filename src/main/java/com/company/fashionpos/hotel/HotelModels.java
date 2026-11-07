@@ -61,7 +61,23 @@ public final class HotelModels {
       @NotNull UUID requestId,
       @NotNull @DecimalMin("0.001") @Digits(integer = 11, fraction = 3) BigDecimal quantity,
       @NotNull @Pattern(regexp = "RECEIPT|USAGE") String kind,
-      @NotBlank @Size(max = 500) String note) {}
+      @NotBlank @Size(max = 500) String note,
+      @DecimalMin("0.0001") @Digits(integer = 12, fraction = 4) BigDecimal unitCost) {
+    public StockRequest(UUID requestId, BigDecimal quantity, String kind, String note) {
+      this(requestId, quantity, kind, note, null);
+    }
+  }
+
+  public record RecipeIngredientRequest(
+      @NotNull UUID itemId,
+      @NotNull @DecimalMin("0.001") @Digits(integer = 11, fraction = 3) BigDecimal quantity,
+      @NotBlank @Size(max = 30) String unit,
+      boolean optional) {}
+
+  public record RecipeRequest(
+      @NotNull UUID requestId,
+      @NotBlank @Size(max = 80) String servingLabel,
+      @NotEmpty @Size(max = 100) List<@Valid RecipeIngredientRequest> ingredients) {}
 
   public record HotelExpenseRequest(
       @NotNull UUID requestId,
@@ -138,6 +154,14 @@ public final class HotelModels {
       UUID bookingId,
       @Size(max = 100) String reference) {}
 
+  public record KitchenPreparationLineRequest(
+      @NotNull UUID lineId,
+      @NotNull @DecimalMin("0.001") @Digits(integer = 11, fraction = 3) BigDecimal quantity) {}
+
+  public record KitchenPreparationRequest(
+      @NotNull UUID requestId,
+      @NotEmpty @Size(max = 100) List<@Valid KitchenPreparationLineRequest> lines) {}
+
   public record WaiterRequest(
       @NotNull UUID branchId, @Size(max = 160) String name, UUID userId, boolean active) {
     public WaiterRequest(UUID branchId, String name, boolean active) {
@@ -206,6 +230,8 @@ public final class HotelModels {
       String unit,
       boolean sellable,
       BigDecimal price,
+      BigDecimal unitCost,
+      boolean unitCostEstimated,
       BigDecimal stock,
       BigDecimal reorderLevel,
       boolean active) {}
@@ -219,13 +245,59 @@ public final class HotelModels {
       BigDecimal price,
       boolean available) {}
 
+  public record RecipeIngredient(
+      UUID itemId,
+      String itemName,
+      BigDecimal quantity,
+      String unit,
+      String stockUnit,
+      BigDecimal unitCost,
+      BigDecimal estimatedCost,
+      boolean estimated,
+      boolean optional) {}
+
+  public record Recipe(
+      UUID id,
+      UUID menuItemId,
+      String menuItemName,
+      BigDecimal sellingPrice,
+      int version,
+      boolean current,
+      String servingLabel,
+      BigDecimal estimatedCost,
+      BigDecimal contribution,
+      BigDecimal ingredientCostPercent,
+      List<RecipeIngredient> ingredients,
+      Instant createdAt) {}
+
   public record OrderLine(
+      UUID lineId,
       UUID itemId,
       String itemType,
       String itemName,
       BigDecimal quantity,
+      BigDecimal preparedQuantity,
+      boolean recipeConfigured,
       BigDecimal unitPrice,
       BigDecimal total) {}
+
+  public record KitchenOrderLine(
+      UUID lineId,
+      String itemName,
+      BigDecimal quantity,
+      BigDecimal preparedQuantity,
+      boolean recipeConfigured) {}
+
+  public record KitchenTicket(
+      UUID id,
+      UUID branchId,
+      String reference,
+      String tableNumber,
+      String serviceType,
+      String notes,
+      String status,
+      Instant createdAt,
+      List<KitchenOrderLine> lines) {}
 
   public record FoodOrder(
       UUID id,
@@ -244,10 +316,23 @@ public final class HotelModels {
       String serviceType,
       String notes,
       String status,
+      String kitchenStatus,
       String hotelName,
       String tillNumber,
       String contactPhone,
       Instant paidAt,
+      Instant createdAt,
+      List<OrderLine> lines) {}
+
+  public record SalesHistoryOrder(
+      UUID id,
+      UUID branchId,
+      String branchName,
+      String reference,
+      String customerName,
+      BigDecimal total,
+      String method,
+      String status,
       Instant createdAt,
       List<OrderLine> lines) {}
 
@@ -270,6 +355,8 @@ public final class HotelModels {
       BigDecimal balance,
       String kind,
       String note,
+      BigDecimal unitCost,
+      BigDecimal costValue,
       Instant createdAt) {}
 
   public record Workspace(

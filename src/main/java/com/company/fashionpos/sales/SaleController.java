@@ -22,11 +22,15 @@ import org.springframework.web.bind.annotation.RestController;
 public class SaleController {
 
   private final SaleService saleService;
+  private final HotelSalesSummaryService hotelSalesSummary;
   private final AuthenticatedUserService authenticatedUserService;
 
   public SaleController(
-      SaleService saleService, AuthenticatedUserService authenticatedUserService) {
+      SaleService saleService,
+      HotelSalesSummaryService hotelSalesSummary,
+      AuthenticatedUserService authenticatedUserService) {
     this.saleService = saleService;
+    this.hotelSalesSummary = hotelSalesSummary;
     this.authenticatedUserService = authenticatedUserService;
   }
 
@@ -36,6 +40,12 @@ public class SaleController {
       @RequestParam(required = false) LocalDate fromDate,
       @RequestParam(required = false) LocalDate toDate) {
     return saleService.listSales(authenticatedUserService.current(principal), fromDate, toDate);
+  }
+
+  @GetMapping("/hotel-summary")
+  public HotelSalesSummary hotelSummary(
+      Principal principal, @RequestParam(required = false) UUID branchId) {
+    return hotelSalesSummary.summary(authenticatedUserService.current(principal), branchId);
   }
 
   @GetMapping("/{saleId}")

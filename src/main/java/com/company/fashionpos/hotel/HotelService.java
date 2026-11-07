@@ -566,6 +566,210 @@ public class HotelService {
     return menuItem(user, target);
   }
 
+  public List<Recipe> recipes(AuthenticatedUser user, UUID branch) {
+    permission(user, "hotel:manage");
+    branches.requireBranchAccess(user, branch);
+    var versions =
+        jdbc.query(
+            """
+            select r.id from hotel_recipes r
+            where r.organization_id=? and r.branch_id=?
+            order by r.menu_item_id,r.version desc
+            """,
+            (r, n) -> uuid(r, "id"),
+            user.organizationId(),
+            branch);
+    return versions.stream().map(id -> recipe(user, id)).toList();
+  }
+
+  @Transactional
+  public Recipe saveRecipe(AuthenticatedUser user, UUID menuItemId, RecipeRequest request) {
+    MenuItem menu = menuItem(user, menuItemId);
+    lock(user, menu.branchId());
+    Command command =
+        command(user, menu.branchId(), request.requestId(), "RECIPE", List.of(menuItemId, request));
+    if (command.replay()) return recipe(user, command.target());
+
+    Set<UUID> ingredientIds = new HashSet<>();
+    for (RecipeIngredientRequest ingredient : request.ingredients()) {
+      if (!ingredientIds.add(ingredient.itemId()))
+        throw new IllegalArgumentException("An ingredient can only appear once in a recipe");
+      Item item = item(user, ingredient.itemId());
+      if (!item.branchId().equals(menu.branchId())
+          || !item.category().equals("INGREDIENT")
+          || !item.active())
+        throw new IllegalArgumentException(
+            "Choose active kitchen ingredients from the same hotel location");
+      convertQuantity(ingredient.quantity(), ingredient.unit(), item.unit());
+    }
+
+    jdbc.update(
+        "update hotel_recipes set is_current=false where organization_id=? and menu_item_id=? and is_current",
+        user.organizationId(),
+        menuItemId);
+    int version =
+        jdbc.queryForObject(
+            "select coalesce(max(version),0)+1 from hotel_recipes where organization_id=? and menu_item_id=?",
+            Integer.class,
+            user.organizationId(),
+            menuItemId);
+    UUID recipeId = command.target();
+    jdbc.update(
+        """
+        insert into hotel_recipes(id,organization_id,branch_id,menu_item_id,version,is_current,serving_label,created_by)
+        values (?,?,?,?,?,true,?,?)
+        """,
+        recipeId,
+        user.organizationId(),
+        menu.branchId(),
+        menuItemId,
+        version,
+        request.servingLabel().trim(),
+        user.userId());
+    for (RecipeIngredientRequest ingredient : request.ingredients()) {
+      jdbc.update(
+          """
+          insert into hotel_recipe_ingredients(recipe_id,organization_id,branch_id,item_id,quantity,unit,optional)
+          values (?,?,?,?,?,?,?)
+          """,
+          recipeId,
+          user.organizationId(),
+          menu.branchId(),
+          ingredient.itemId(),
+          ingredient.quantity(),
+          ingredient.unit().trim(),
+          ingredient.optional());
+    }
+    audit.record(
+        user,
+        menu.branchId(),
+        "HOTEL_RECIPE_VERSION_SAVED",
+        "HOTEL_RECIPE",
+        recipeId,
+        Map.of("menuItemId", menuItemId, "version", version));
+    return recipe(user, recipeId);
+  }
+
+  private Recipe recipe(AuthenticatedUser user, UUID id) {
+    var rows =
+        jdbc.query(
+            """
+            select r.*,r.is_current recipe_current,m.name menu_item_name,m.price selling_price
+            from hotel_recipes r join hotel_menu_items m on m.id=r.menu_item_id
+            where r.organization_id=? and r.id=?
+            """,
+            (r, n) ->
+                new RecipeHeader(
+                    uuid(r, "id"),
+                    uuid(r, "menu_item_id"),
+                    uuid(r, "branch_id"),
+                    r.getString("menu_item_name"),
+                    r.getBigDecimal("selling_price"),
+                    r.getInt("version"),
+                    r.getBoolean("recipe_current"),
+                    r.getString("serving_label"),
+                    instant(r, "created_at")),
+            user.organizationId(),
+            id);
+    if (rows.isEmpty()) throw new EntityNotFoundException("Food recipe not found");
+    RecipeHeader header = rows.get(0);
+    branches.requireBranchAccess(user, header.branchId());
+    var ingredients =
+        jdbc.query(
+            """
+            select ri.item_id,i.name item_name,ri.quantity,ri.unit,i.unit stock_unit,
+              i.unit_cost,i.unit_cost_estimated,ri.optional
+            from hotel_recipe_ingredients ri join hotel_items i on i.id=ri.item_id
+            where ri.recipe_id=? and ri.organization_id=? order by i.name
+            """,
+            (r, n) -> {
+              BigDecimal unitCost = r.getBigDecimal("unit_cost");
+              BigDecimal amount =
+                  unitCost == null
+                      ? null
+                      : convertQuantity(
+                              r.getBigDecimal("quantity"),
+                              r.getString("unit"),
+                              r.getString("stock_unit"))
+                          .multiply(unitCost)
+                          .setScale(2, RoundingMode.HALF_UP);
+              return new RecipeIngredient(
+                  uuid(r, "item_id"),
+                  r.getString("item_name"),
+                  r.getBigDecimal("quantity"),
+                  r.getString("unit"),
+                  r.getString("stock_unit"),
+                  unitCost,
+                  amount,
+                  r.getBoolean("unit_cost_estimated"),
+                  r.getBoolean("optional"));
+            },
+            id,
+            user.organizationId());
+    boolean missingRequiredCost =
+        ingredients.stream().anyMatch(i -> !i.optional() && i.estimatedCost() == null);
+    BigDecimal cost =
+        missingRequiredCost
+            ? null
+            : ingredients.stream()
+                .filter(i -> !i.optional())
+                .map(RecipeIngredient::estimatedCost)
+                .reduce(ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
+    BigDecimal contribution = cost == null ? null : header.sellingPrice().subtract(cost);
+    BigDecimal costPercent =
+        cost == null
+            ? null
+            : cost.multiply(new BigDecimal("100"))
+                .divide(header.sellingPrice(), 2, RoundingMode.HALF_UP);
+    return new Recipe(
+        header.id(),
+        header.menuItemId(),
+        header.menuItemName(),
+        header.sellingPrice(),
+        header.version(),
+        header.current(),
+        header.servingLabel(),
+        cost,
+        contribution,
+        costPercent,
+        ingredients,
+        header.createdAt());
+  }
+
+  private record RecipeHeader(
+      UUID id,
+      UUID menuItemId,
+      UUID branchId,
+      String menuItemName,
+      BigDecimal sellingPrice,
+      int version,
+      boolean current,
+      String servingLabel,
+      Instant createdAt) {}
+
+  private static BigDecimal convertQuantity(BigDecimal quantity, String fromUnit, String toUnit) {
+    Unit from = unit(fromUnit);
+    Unit to = unit(toUnit);
+    if (!from.dimension().equals(to.dimension()))
+      throw new IllegalArgumentException("Recipe units must match the ingredient stock unit");
+    return quantity.multiply(from.factor()).divide(to.factor(), 8, RoundingMode.HALF_UP);
+  }
+
+  private static Unit unit(String value) {
+    String normalized = value.trim().toLowerCase(Locale.ROOT);
+    return switch (normalized) {
+      case "g", "gram", "grams" -> new Unit("mass", BigDecimal.ONE);
+      case "kg", "kilogram", "kilograms" -> new Unit("mass", new BigDecimal("1000"));
+      case "ml", "milliliter", "milliliters", "millilitre", "millilitres" ->
+          new Unit("volume", BigDecimal.ONE);
+      case "l", "liter", "liters", "litre", "litres" -> new Unit("volume", new BigDecimal("1000"));
+      default -> new Unit("custom:" + normalized, BigDecimal.ONE);
+    };
+  }
+
+  private record Unit(String dimension, BigDecimal factor) {}
+
   private List<Room> rooms(AuthenticatedUser user, UUID branch) {
     return jdbc.query(
         "select * from hotel_rooms where organization_id=? and branch_id=? order by number",
@@ -877,11 +1081,30 @@ public class HotelService {
   }
 
   private List<Item> items(AuthenticatedUser user, UUID branch) {
-    return jdbc.query(
-        "select * from hotel_items where organization_id=? and branch_id=? order by name",
-        this::readItem,
-        user.organizationId(),
-        branch);
+    var items =
+        jdbc.query(
+            "select * from hotel_items where organization_id=? and branch_id=? order by name",
+            this::readItem,
+            user.organizationId(),
+            branch);
+    if (user.hasPermission("admin:manage") || user.hasPermission("hotel:manage")) return items;
+    return items.stream().map(this::withoutCost).toList();
+  }
+
+  private Item withoutCost(Item item) {
+    return new Item(
+        item.id(),
+        item.branchId(),
+        item.name(),
+        item.category(),
+        item.unit(),
+        item.sellable(),
+        item.price(),
+        null,
+        false,
+        item.stock(),
+        item.reorderLevel(),
+        item.active());
   }
 
   private Item item(AuthenticatedUser user, UUID id) {
@@ -940,9 +1163,14 @@ public class HotelService {
       throw new IllegalArgumentException("An item with this name already exists at this hotel");
     if (id != null
         && !item(user, id).unit().equals(request.unit().trim())
-        && count("select count(*) from hotel_stock_movements where item_id=?", id) > 0)
+        && (count("select count(*) from hotel_stock_movements where item_id=?", id) > 0
+            || count("select count(*) from hotel_recipe_ingredients where item_id=?", id) > 0))
       throw new IllegalArgumentException(
           "Keep the existing unit for items with stock history; create a new item for a different unit");
+    if (id != null
+        && count("select count(*) from hotel_recipe_ingredients where item_id=?", id) > 0
+        && !request.category().equals("INGREDIENT"))
+      throw new IllegalArgumentException("Items used by recipes must remain kitchen ingredients");
     if (id == null)
       jdbc.update(
           """
@@ -995,7 +1223,21 @@ public class HotelService {
       throw new IllegalArgumentException("Reactivate this inventory item before changing stock");
     BigDecimal delta =
         request.kind().equals("RECEIPT") ? request.quantity() : request.quantity().negate();
-    move(user, current, command.target(), delta, request.kind(), request.note().trim());
+    if (request.kind().equals("RECEIPT")
+        && current.category().equals("INGREDIENT")
+        && request.unitCost() == null)
+      throw new IllegalArgumentException(
+          "Enter the purchase cost per stock unit for this ingredient");
+    if (request.kind().equals("USAGE") && request.unitCost() != null)
+      throw new IllegalArgumentException("A unit cost can only be recorded on a stock receipt");
+    move(
+        user,
+        current,
+        command.target(),
+        delta,
+        request.kind(),
+        request.note().trim(),
+        request.unitCost());
     audit.record(
         user,
         current.branchId(),
@@ -1008,20 +1250,55 @@ public class HotelService {
 
   private void move(
       AuthenticatedUser user, Item item, UUID id, BigDecimal delta, String kind, String note) {
+    move(user, item, id, delta, kind, note, null);
+  }
+
+  private void move(
+      AuthenticatedUser user,
+      Item item,
+      UUID id,
+      BigDecimal delta,
+      String kind,
+      String note,
+      BigDecimal receiptUnitCost) {
     BigDecimal balance = item.stock().add(delta);
     if (balance.signum() < 0)
       throw new IllegalArgumentException("Insufficient stock for " + item.name());
     if (balance.compareTo(new BigDecimal("99999999999.999")) > 0)
       throw new IllegalArgumentException("Stock quantity is too large");
+    BigDecimal movementUnitCost = kind.equals("RECEIPT") ? receiptUnitCost : item.unitCost();
+    BigDecimal nextUnitCost = item.unitCost();
+    boolean nextUnitCostEstimated = item.unitCostEstimated();
+    if (kind.equals("RECEIPT") && receiptUnitCost != null) {
+      if (item.stock().signum() == 0) {
+        nextUnitCost = receiptUnitCost;
+        nextUnitCostEstimated = false;
+      } else if (item.unitCost() != null) {
+        nextUnitCost =
+            item.stock()
+                .multiply(item.unitCost())
+                .add(delta.multiply(receiptUnitCost))
+                .divide(balance, 4, RoundingMode.HALF_UP);
+      } else {
+        nextUnitCost = receiptUnitCost;
+        nextUnitCostEstimated = true;
+      }
+    }
+    BigDecimal costValue =
+        movementUnitCost == null
+            ? null
+            : delta.abs().multiply(movementUnitCost).setScale(2, RoundingMode.HALF_UP);
     jdbc.update(
-        "update hotel_items set stock=? where id=? and organization_id=?",
+        "update hotel_items set stock=?,unit_cost=?,unit_cost_estimated=? where id=? and organization_id=?",
         balance,
+        nextUnitCost,
+        nextUnitCostEstimated,
         item.id(),
         user.organizationId());
     jdbc.update(
         """
-        insert into hotel_stock_movements(id,organization_id,branch_id,item_id,quantity,balance,kind,note)
-        values (?,?,?,?,?,?,?,?)
+        insert into hotel_stock_movements(id,organization_id,branch_id,item_id,quantity,balance,kind,note,unit_cost,cost_value)
+        values (?,?,?,?,?,?,?,?,?,?)
         """,
         id,
         user.organizationId(),
@@ -1030,10 +1307,13 @@ public class HotelService {
         delta,
         balance,
         kind,
-        note);
+        note,
+        movementUnitCost,
+        costValue);
   }
 
   private List<StockMovement> movements(AuthenticatedUser user, UUID branch) {
+    boolean canSeeCost = user.hasPermission("admin:manage") || user.hasPermission("hotel:manage");
     return jdbc.query(
         """
         select m.*, i.name item_name from hotel_stock_movements m join hotel_items i on i.id=m.item_id
@@ -1048,6 +1328,8 @@ public class HotelService {
                 r.getBigDecimal("balance"),
                 r.getString("kind"),
                 r.getString("note"),
+                canSeeCost ? r.getBigDecimal("unit_cost") : null,
+                canSeeCost ? r.getBigDecimal("cost_value") : null,
                 instant(r, "created_at")),
         user.organizationId(),
         branch);
@@ -1239,10 +1521,13 @@ public class HotelService {
         throw new IllegalArgumentException("Order line total must be at least 0.01");
       lines.add(
           new OrderLine(
+              UUID.randomUUID(),
               entry.getKey().id(),
               entry.getKey().type(),
               name,
               entry.getValue(),
+              ZERO,
+              false,
               price,
               lineTotal));
       total = money(total.add(lineTotal));
@@ -1250,11 +1535,13 @@ public class HotelService {
     String ref = reference("FOOD", command.target());
     String customer = stay == null ? clean(request.customerName()) : stay.guestName();
     if (customer.isBlank()) customer = "Walk-in customer";
+    boolean hasFood = lines.stream().anyMatch(line -> line.itemType().equals("FOOD"));
     jdbc.update(
         """
         insert into hotel_orders(id,organization_id,branch_id,booking_id,reference,customer_name,total,method,payment_reference,
-          operator_id,waiter_id,served_by_name,table_number,service_type,notes,status,hotel_name,till_number,contact_phone,paid_at)
-        values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          operator_id,waiter_id,served_by_name,table_number,service_type,notes,status,kitchen_status,
+          hotel_name,till_number,contact_phone,paid_at)
+        values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         command.target(),
         user.organizationId(),
@@ -1272,6 +1559,7 @@ public class HotelService {
         request.serviceType(),
         clean(request.notes()),
         request.method().equals("UNPAID") ? "OPEN" : "CLOSED",
+        hasFood ? "PENDING" : "READY",
         settings.hotelName(),
         settings.tillNumber(),
         settings.contactPhone(),
@@ -1282,7 +1570,7 @@ public class HotelService {
           """
           insert into hotel_order_lines(id,order_id,item_type,menu_item_id,stock_item_id,item_name,quantity,unit_price,total) values (?,?,?,?,?,?,?,?,?)
           """,
-          UUID.randomUUID(),
+          line.lineId(),
           command.target(),
           line.itemType(),
           line.itemType().equals("FOOD") ? line.itemId() : null,
@@ -1291,6 +1579,8 @@ public class HotelService {
           line.quantity(),
           line.unitPrice(),
           line.total());
+      if (line.itemType().equals("FOOD"))
+        snapshotRecipeIngredients(user, line.lineId(), line.itemId(), request.branchId());
       if (line.itemType().equals("PRODUCT"))
         move(
             user,
@@ -1309,6 +1599,60 @@ public class HotelService {
         Map.of("total", total, "method", request.method()));
     return order(user, command.target());
   }
+
+  private void snapshotRecipeIngredients(
+      AuthenticatedUser user, UUID orderLineId, UUID menuItemId, UUID branchId) {
+    var recipeIds =
+        jdbc.query(
+            """
+            select id from hotel_recipes
+            where organization_id=? and branch_id=? and menu_item_id=? and is_current
+            """,
+            (r, n) -> uuid(r, "id"),
+            user.organizationId(),
+            branchId,
+            menuItemId);
+    if (recipeIds.isEmpty()) return;
+
+    UUID recipeId = recipeIds.get(0);
+    jdbc.update("update hotel_order_lines set recipe_id=? where id=?", recipeId, orderLineId);
+    var ingredients =
+        jdbc.query(
+            """
+            select ri.item_id,ri.quantity,ri.unit,i.unit stock_unit
+            from hotel_recipe_ingredients ri
+            join hotel_items i on i.id=ri.item_id
+            where ri.recipe_id=? and ri.optional=false
+            order by ri.item_id
+            """,
+            (r, n) -> {
+              BigDecimal perServing =
+                  convertQuantity(
+                          r.getBigDecimal("quantity"),
+                          r.getString("unit"),
+                          r.getString("stock_unit"))
+                      .setScale(6, RoundingMode.HALF_UP);
+              if (perServing.signum() <= 0)
+                throw new IllegalArgumentException(
+                    "Recipe quantities must be measurable in the ingredient stock unit");
+              return new RecipeIngredientSnapshot(
+                  uuid(r, "item_id"), perServing, r.getString("stock_unit"));
+            },
+            recipeId);
+    for (RecipeIngredientSnapshot ingredient : ingredients)
+      jdbc.update(
+          """
+          insert into hotel_order_line_recipe_ingredients(order_line_id,item_id,quantity_per_serving,stock_unit)
+          values (?,?,?,?)
+          """,
+          orderLineId,
+          ingredient.itemId(),
+          ingredient.quantityPerServing(),
+          ingredient.stockUnit());
+  }
+
+  private record RecipeIngredientSnapshot(
+      UUID itemId, BigDecimal quantityPerServing, String stockUnit) {}
 
   private static final String ORDER_SQL =
       """
@@ -1336,11 +1680,192 @@ public class HotelService {
 
   public FoodOrder order(AuthenticatedUser user, UUID id) {
     permission(user, "hotel:view", "hotel:sell");
+    return loadOrder(user, id);
+  }
+
+  private FoodOrder loadOrder(AuthenticatedUser user, UUID id) {
     var rows = jdbc.query(ORDER_SQL + " and o.id=?", this::readOrder, user.organizationId(), id);
     if (rows.isEmpty()) throw new EntityNotFoundException("Food order not found");
     branches.requireBranchAccess(user, rows.get(0).branchId());
     return rows.get(0);
   }
+
+  public List<KitchenTicket> kitchenOrders(AuthenticatedUser user, UUID branch) {
+    permission(user, "hotel:kitchen");
+    branches.requireBranchAccess(user, branch);
+    return jdbc.query(
+        ORDER_SQL
+            + " and o.branch_id=? and o.status<>'CANCELLED' "
+            + "and o.kitchen_status in ('PENDING','PREPARING') order by o.created_at,o.id",
+        (row, index) -> kitchenTicket(readOrder(row, index)),
+        user.organizationId(),
+        branch);
+  }
+
+  private KitchenTicket kitchenTicket(FoodOrder order) {
+    return new KitchenTicket(
+        order.id(),
+        order.branchId(),
+        order.reference(),
+        order.tableNumber(),
+        order.serviceType(),
+        order.notes(),
+        order.kitchenStatus(),
+        order.createdAt(),
+        order.lines().stream()
+            .filter(line -> line.itemType().equals("FOOD"))
+            .map(
+                line ->
+                    new KitchenOrderLine(
+                        line.lineId(),
+                        line.itemName(),
+                        line.quantity(),
+                        line.preparedQuantity(),
+                        line.recipeConfigured()))
+            .toList());
+  }
+
+  @Transactional
+  public KitchenTicket prepareOrder(
+      AuthenticatedUser user, UUID id, KitchenPreparationRequest request) {
+    permission(user, "hotel:kitchen");
+    UUID branch =
+        jdbc
+            .query(
+                "select branch_id from hotel_orders where organization_id=? and id=?",
+                (r, n) -> uuid(r, "branch_id"),
+                user.organizationId(),
+                id)
+            .stream()
+            .findFirst()
+            .orElseThrow(() -> new EntityNotFoundException("Food order not found"));
+    lock(user, branch, "hotel:kitchen");
+    Command command =
+        command(user, branch, request.requestId(), "KITCHEN_PREPARATION", List.of(id, request));
+    if (command.replay()) return kitchenTicket(loadOrder(user, id));
+
+    FoodOrder current = loadOrder(user, id);
+    if (current.status().equals("CANCELLED"))
+      throw new IllegalArgumentException("A cancelled order cannot be prepared");
+    Set<UUID> lineIds = new HashSet<>();
+    for (KitchenPreparationLineRequest prepared : request.lines()) {
+      if (!lineIds.add(prepared.lineId()))
+        throw new IllegalArgumentException("An order line can only appear once per preparation");
+      var lineRows =
+          jdbc.query(
+              """
+              select id,item_type,quantity,prepared_quantity,recipe_id
+              from hotel_order_lines where id=? and order_id=? for update
+              """,
+              (r, n) ->
+                  new PreparedOrderLine(
+                      uuid(r, "id"),
+                      r.getString("item_type"),
+                      r.getBigDecimal("quantity"),
+                      r.getBigDecimal("prepared_quantity"),
+                      r.getObject("recipe_id", UUID.class)),
+              prepared.lineId(),
+              id);
+      if (lineRows.isEmpty())
+        throw new IllegalArgumentException("Select a food line from this order");
+      PreparedOrderLine line = lineRows.get(0);
+      if (!line.itemType().equals("FOOD"))
+        throw new IllegalArgumentException("Only prepared food can be recorded by the kitchen");
+      BigDecimal nextPrepared = line.preparedQuantity().add(prepared.quantity());
+      if (nextPrepared.compareTo(line.quantity()) > 0)
+        throw new IllegalArgumentException("Prepared quantity cannot exceed the ordered quantity");
+
+      consumeRecipeIngredients(user, id, current.reference(), line, prepared.quantity());
+      jdbc.update(
+          """
+          insert into hotel_kitchen_preparations(
+            id,organization_id,branch_id,order_id,order_line_id,request_id,quantity,prepared_by)
+          values (?,?,?,?,?,?,?,?)
+          """,
+          UUID.randomUUID(),
+          user.organizationId(),
+          branch,
+          id,
+          line.id(),
+          request.requestId(),
+          prepared.quantity(),
+          user.userId());
+      jdbc.update(
+          "update hotel_order_lines set prepared_quantity=? where id=? and order_id=?",
+          nextPrepared,
+          line.id(),
+          id);
+    }
+
+    BigDecimal totalFoodQuantity =
+        jdbc.queryForObject(
+            "select coalesce(sum(quantity),0) from hotel_order_lines where order_id=? and item_type='FOOD'",
+            BigDecimal.class,
+            id);
+    BigDecimal preparedFoodQuantity =
+        jdbc.queryForObject(
+            "select coalesce(sum(prepared_quantity),0) from hotel_order_lines where order_id=? and item_type='FOOD'",
+            BigDecimal.class,
+            id);
+    String status = preparedFoodQuantity.compareTo(totalFoodQuantity) == 0 ? "READY" : "PREPARING";
+    jdbc.update("update hotel_orders set kitchen_status=? where id=?", status, id);
+    audit.record(
+        user,
+        branch,
+        "HOTEL_KITCHEN_PREPARED",
+        "HOTEL_ORDER",
+        id,
+        Map.of("reference", current.reference(), "lineCount", request.lines().size()));
+    return kitchenTicket(loadOrder(user, id));
+  }
+
+  private void consumeRecipeIngredients(
+      AuthenticatedUser user,
+      UUID orderId,
+      String reference,
+      PreparedOrderLine line,
+      BigDecimal preparedQuantity) {
+    if (line.recipeId() == null) return;
+    var ingredients =
+        jdbc.query(
+            """
+            select item_id,quantity_per_serving,stock_unit
+            from hotel_order_line_recipe_ingredients
+            where order_line_id=? order by item_id
+            """,
+            (r, n) ->
+                new RecipeIngredientSnapshot(
+                    uuid(r, "item_id"),
+                    r.getBigDecimal("quantity_per_serving"),
+                    r.getString("stock_unit")),
+            line.id());
+    for (RecipeIngredientSnapshot ingredient : ingredients) {
+      BigDecimal quantity =
+          ingredient
+              .quantityPerServing()
+              .multiply(preparedQuantity)
+              .setScale(3, RoundingMode.HALF_UP);
+      if (quantity.signum() <= 0)
+        throw new IllegalArgumentException(
+            "Recipe ingredient quantities must be at least one thousandth of a stock unit");
+      Item stockItem = item(user, ingredient.itemId());
+      if (!stockItem.category().equals("INGREDIENT")
+          || !stockItem.active()
+          || !stockItem.unit().equals(ingredient.stockUnit()))
+        throw new IllegalArgumentException(
+            "An ingredient's active stock unit changed after this order was placed");
+      move(
+          user,
+          stockItem,
+          UUID.randomUUID(),
+          quantity.negate(),
+          "KITCHEN",
+          "Prepared " + reference + " · " + line.id());
+    }
+  }
+
+  private record PreparedOrderLine(
+      UUID id, String itemType, BigDecimal quantity, BigDecimal preparedQuantity, UUID recipeId) {}
 
   public List<FoodOrder> bookingOrders(AuthenticatedUser user, UUID id) {
     permission(user, "hotel:view");
@@ -1350,6 +1875,63 @@ public class HotelService {
         this::readOrder,
         user.organizationId(),
         id);
+  }
+
+  public List<SalesHistoryOrder> salesHistory(
+      AuthenticatedUser user, UUID branch, LocalDate from, LocalDate to) {
+    if (to.isBefore(from)) throw new IllegalArgumentException("To date cannot be before from date");
+    if (branch != null) branches.requireBranchAccess(user, branch);
+
+    List<UUID> scopedBranches;
+    if (branch != null) {
+      scopedBranches = List.of(branch);
+    } else if (!user.branchIds().isEmpty()) {
+      scopedBranches = user.branchIds().stream().toList();
+    } else if (user.isCashier() || user.isHotelSalesManager()) {
+      return List.of();
+    } else {
+      scopedBranches = List.of();
+    }
+
+    String branchFilter = "";
+    List<Object> parameters = new ArrayList<>();
+    parameters.add(user.organizationId());
+    parameters.add(from);
+    parameters.add(to);
+    if (!scopedBranches.isEmpty()) {
+      branchFilter =
+          " and o.branch_id in ("
+              + String.join(",", Collections.nCopies(scopedBranches.size(), "?"))
+              + ")";
+      parameters.addAll(scopedBranches);
+    }
+    return jdbc.query(
+        """
+        select o.*,r.number room_number,b.name branch_name
+        from hotel_orders o
+        join branches b on b.id=o.branch_id
+        left join hotel_bookings booking on booking.id=o.booking_id
+        left join hotel_rooms r on r.id=booking.room_id
+        where o.organization_id=? and o.status='CLOSED'
+          and (o.created_at at time zone b.time_zone)::date between ? and ?
+        """
+            + branchFilter
+            + " order by o.created_at desc,o.id",
+        (row, index) -> {
+          FoodOrder order = readOrder(row, index);
+          return new SalesHistoryOrder(
+              order.id(),
+              order.branchId(),
+              row.getString("branch_name"),
+              order.reference(),
+              order.customerName(),
+              order.total(),
+              order.method(),
+              order.status(),
+              order.createdAt(),
+              order.lines());
+        },
+        parameters.toArray());
   }
 
   @Transactional
@@ -1410,7 +1992,7 @@ public class HotelService {
             "RETURN",
             "Cancelled " + current.reference());
     jdbc.update(
-        "update hotel_orders set status='CANCELLED' where id=? and organization_id=?",
+        "update hotel_orders set status='CANCELLED',kitchen_status='CANCELLED' where id=? and organization_id=?",
         id,
         user.organizationId());
     audit.record(
@@ -1673,6 +2255,8 @@ public class HotelService {
         r.getString("unit"),
         r.getBoolean("sellable"),
         r.getBigDecimal("price"),
+        r.getBigDecimal("unit_cost"),
+        r.getBoolean("unit_cost_estimated"),
         r.getBigDecimal("stock"),
         r.getBigDecimal("reorder_level"),
         r.getBoolean("active"));
@@ -1714,10 +2298,13 @@ public class HotelService {
             "select *,coalesce(menu_item_id,stock_item_id) item_id from hotel_order_lines where order_id=? order by item_name,id",
             (row, index) ->
                 new OrderLine(
+                    uuid(row, "id"),
                     uuid(row, "item_id"),
                     row.getString("item_type"),
                     row.getString("item_name"),
                     row.getBigDecimal("quantity"),
+                    row.getBigDecimal("prepared_quantity"),
+                    row.getObject("recipe_id", UUID.class) != null,
                     row.getBigDecimal("unit_price"),
                     row.getBigDecimal("total")),
             id);
@@ -1738,6 +2325,7 @@ public class HotelService {
         r.getString("service_type"),
         r.getString("notes"),
         r.getString("status"),
+        r.getString("kitchen_status"),
         r.getString("hotel_name"),
         r.getString("till_number"),
         r.getString("contact_phone"),

@@ -26,6 +26,7 @@ public class StaffService {
   private static final String SHOP_MANAGER_ROLE_KEY = "SHOP_MANAGER";
   private static final String CASHIER_ROLE_KEY = "CASHIER";
   private static final String WAITER_ROLE_KEY = "WAITER";
+  private static final String KITCHEN_ROLE_KEY = "KITCHEN";
   private static final Set<String> CASHIER_PERMISSIONS =
       Set.of("pos:sell", "expenses:create", "shifts:manage");
   private static final Set<String> SUPPORTED_ROLE_KEYS =
@@ -34,7 +35,8 @@ public class StaffService {
           SHOP_MANAGER_ROLE_KEY,
           CASHIER_ROLE_KEY,
           "HOTEL_SALES_MANAGER",
-          WAITER_ROLE_KEY);
+          WAITER_ROLE_KEY,
+          KITCHEN_ROLE_KEY);
   private static final String PROFIT_VIEW_PERMISSION = "profit:view";
 
   private final UserAccountRepository userAccountRepository;
@@ -106,6 +108,14 @@ public class StaffService {
         organizationId);
     jdbcTemplate.update(
         """
+        insert into roles(id,organization_id,name,role_key,description)
+        select gen_random_uuid(),o.id,'Kitchen','KITCHEN','Hotel kitchen order preparation'
+        from organizations o
+        where o.id=? on conflict (organization_id,role_key) do nothing
+        """,
+        organizationId);
+    jdbcTemplate.update(
+        """
         insert into role_permissions(role_id,permission_id)
         select r.id,p.id from roles r cross join permissions p where r.organization_id=?
         and r.role_key='HOTEL_SALES_MANAGER' and p.code='hotel:sell'
@@ -117,6 +127,14 @@ public class StaffService {
         insert into role_permissions(role_id,permission_id)
         select r.id,p.id from roles r cross join permissions p where r.organization_id=?
         and r.role_key='WAITER' and p.code='hotel:sell'
+        on conflict do nothing
+        """,
+        organizationId);
+    jdbcTemplate.update(
+        """
+        insert into role_permissions(role_id,permission_id)
+        select r.id,p.id from roles r cross join permissions p where r.organization_id=?
+        and r.role_key='KITCHEN' and p.code='hotel:kitchen'
         on conflict do nothing
         """,
         organizationId);
@@ -334,10 +352,12 @@ public class StaffService {
                         .stream()
                         .anyMatch(
                             key ->
-                                key.equals("HOTEL_SALES_MANAGER") || key.equals(WAITER_ROLE_KEY)));
+                                key.equals("HOTEL_SALES_MANAGER")
+                                    || key.equals(WAITER_ROLE_KEY)
+                                    || key.equals(KITCHEN_ROLE_KEY)));
     if (hotelStaff && (branchIds.isEmpty() || roleIds.size() != 1))
       throw new IllegalArgumentException(
-          "Hotel Sales Manager and Waiter must be assigned alone and to at least one hotel location");
+          "Hotel sales, waiter, and kitchen roles must be assigned alone and to at least one hotel location");
 
     for (UUID branchId : branchIds) {
       if (!branchRepository.existsWithinOrganization(branchId, user.organizationId())) {
@@ -396,6 +416,12 @@ public class StaffService {
                 .anyMatch(id -> !permissionHasCode(id, "hotel:sell")))) {
       throw new IllegalArgumentException("Waiter permissions are limited to hotel sales");
     }
+    if (roleKey.equals(KITCHEN_ROLE_KEY)
+        && (requestedPermissionIds == null
+            || requestedPermissionIds.size() != 1
+            || requestedPermissionIds.stream()
+                .anyMatch(id -> !permissionHasCode(id, "hotel:kitchen"))))
+      throw new IllegalArgumentException("Kitchen permissions are limited to food preparation");
     if (roleKey.equals("HOTEL_SALES_MANAGER")
         && (requestedPermissionIds == null
             || requestedPermissionIds.size() != 1

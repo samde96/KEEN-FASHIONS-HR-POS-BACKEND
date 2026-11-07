@@ -109,6 +109,12 @@ public class SecurityConfig {
                     .hasRole("ADMIN")
                     .requestMatchers(HttpMethod.GET, "/api/v1/hotel/reports")
                     .hasAnyAuthority(ADMIN_MANAGE, "hotel:reports")
+                    .requestMatchers(HttpMethod.GET, "/api/v1/hotel/recipes")
+                    .hasAnyAuthority(ADMIN_MANAGE, "hotel:manage")
+                    .requestMatchers(HttpMethod.GET, "/api/v1/hotel/kitchen")
+                    .hasAnyAuthority(ADMIN_MANAGE, "hotel:manage", "hotel:kitchen")
+                    .requestMatchers(HttpMethod.POST, "/api/v1/hotel/orders/*/preparations")
+                    .hasAnyAuthority(ADMIN_MANAGE, "hotel:manage", "hotel:kitchen")
                     .requestMatchers(
                         HttpMethod.GET, "/api/v1/hotel/checkout", "/api/v1/hotel/orders/*")
                     .hasAnyAuthority(ADMIN_MANAGE, "hotel:manage", "hotel:view", "hotel:sell")
@@ -146,6 +152,8 @@ public class SecurityConfig {
                     .requestMatchers(HttpMethod.GET, "/api/v1/daily-sales-reports/**")
                     .hasAnyAuthority(ADMIN_MANAGE, REPORTS_VIEW)
                     .requestMatchers(HttpMethod.GET, "/api/v1/sale-reversals")
+                    .hasAnyAuthority(ADMIN_MANAGE, REPORTS_VIEW, SALES_VIEW)
+                    .requestMatchers(HttpMethod.GET, "/api/v1/hotel/sales-history")
                     .hasAnyAuthority(ADMIN_MANAGE, REPORTS_VIEW, SALES_VIEW)
                     .requestMatchers("/api/v1/daily-sales-reports/**")
                     .hasAuthority(ADMIN_MANAGE)
@@ -264,7 +272,8 @@ public class SecurityConfig {
                 "/api/v1/organization/current",
                 "/api/v1/branches",
                 "/api/v1/hotel/checkout",
-                "/api/v1/hotel/orders")
+                "/api/v1/hotel/orders",
+                "/api/v1/hotel/sales-history")
             .contains(path)
         || path.startsWith("/api/v1/hotel/orders/"));
   }
