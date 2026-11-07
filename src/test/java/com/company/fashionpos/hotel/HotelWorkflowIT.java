@@ -1144,8 +1144,11 @@ class HotelWorkflowIT {
     assertThat(order.operatorId()).isEqualTo(counter.userId());
     assertThat(order.waiterId()).isEqualTo(waiterId);
     assertThat(order.status()).isEqualTo("OPEN");
+    assertThat(order.receiptNumber()).matches("\\d{6}");
     assertThat(order.tillNumber()).isEqualTo("1234567");
     assertThat(order.contactPhone()).isEqualTo("+254700000111");
+    assertThat(order.paybillNumber()).isEmpty();
+    assertThat(order.accountNumber()).isEmpty();
     assertThat(hotel.workspace(admin, branch).items().get(0).stock()).isEqualByComparingTo("9");
     assertThat(hotel.workspace(admin, branch).movements()).hasSize(2);
     assertThat(hotel.report(admin, branch, date, date).foodRevenue()).isEqualByComparingTo("1400");
@@ -1153,9 +1156,24 @@ class HotelWorkflowIT {
         .isEqualByComparingTo("250");
     hotel.saveWaiter(admin, waiterId, new WaiterRequest(branch, "Alice renamed", false));
     hotel.saveReceiptSettings(
-        admin, new ReceiptSettingsRequest(branch, "New hotel name", "7654321", "+254700000222"));
+        admin,
+        new ReceiptSettingsRequest(
+            branch,
+            "New hotel name",
+            "+254700000222",
+            "+254711111333",
+            "PAYBILL",
+            "542542",
+            "795987"));
+    var settings = hotel.receiptSettings(admin, branch);
+    assertThat(settings.paybillNumber()).isEqualTo("542542");
+    assertThat(settings.accountNumber()).isEqualTo("795987");
+    assertThat(settings.paymentType()).isEqualTo("PAYBILL");
+    assertThat(settings.paymentNumber()).isEqualTo("542542");
+    assertThat(settings.complaintsPhone()).isEqualTo("+254711111333");
     FoodOrder reprint = hotel.order(counter, order.id());
     assertThat(reprint.servedByName()).isEqualTo("Alice Waiter");
+    assertThat(reprint.receiptNumber()).isEqualTo(order.receiptNumber());
     assertThat(reprint.hotelName()).isEqualTo("Test Hotel");
     assertThat(reprint.tillNumber()).isEqualTo("1234567");
     OrderPaymentRequest payment = new OrderPaymentRequest(UUID.randomUUID(), "CASH", null, "");
@@ -1163,6 +1181,25 @@ class HotelWorkflowIT {
     hotel.settleOrder(counter, order.id(), payment);
     assertThat(hotel.report(admin, branch, date, date).paymentsReceived())
         .isEqualByComparingTo("1650");
+    FoodOrder newOrder =
+        hotel.sell(
+            counter,
+            new OrderRequest(
+                UUID.randomUUID(),
+                branch,
+                waiterId,
+                null,
+                "Guest",
+                "CASH",
+                "",
+                "TAKEAWAY",
+                "",
+                "",
+                List.of(new OrderLineRequest(bottled.id(), "PRODUCT", BigDecimal.ONE))));
+    assertThat(newOrder.paybillNumber()).isEqualTo("542542");
+    assertThat(newOrder.accountNumber()).isEqualTo("795987");
+    assertThat(newOrder.complaintsPhone()).isEqualTo("+254711111333");
+    assertThat(newOrder.receiptNumber()).matches("\\d{6}").isNotEqualTo(order.receiptNumber());
     assertThatThrownBy(() -> hotel.workspace(counter, branch))
         .isInstanceOf(AccessDeniedException.class);
     assertThatThrownBy(
@@ -1304,9 +1341,9 @@ class HotelWorkflowIT {
         unpaid.id());
     jdbc.update(
         """
-        insert into hotel_orders(id,organization_id,branch_id,reference,customer_name,total,method,
+        insert into hotel_orders(id,organization_id,branch_id,reference,receipt_number,customer_name,total,method,
           operator_id,served_by_name,table_number,service_type,notes,status,paid_at)
-        select gen_random_uuid(),?,?,'H-'||n,'Historic guest',1,'CASH',?,'Owner','1','DINE_IN','','CLOSED',now()
+        select gen_random_uuid(),?,?,'H-'||n,lpad((900000+n)::text,6,'0'),'Historic guest',1,'CASH',?,'Owner','1','DINE_IN','','CLOSED',now()
         from generate_series(1,101) n
         """,
         org,
@@ -1376,6 +1413,7 @@ class HotelWorkflowIT {
       assertThat(migrated.get("operator_id")).isEqualTo(operator);
       assertThat(migrated.get("served_by_name")).isEqualTo("Alice original");
       assertThat((BigDecimal) migrated.get("total")).isEqualByComparingTo("125");
+      assertThat(migrated.get("receipt_number")).isEqualTo("000001");
       assertThat(migrated.get("status")).isEqualTo("CLOSED");
       assertThat(migrated.get("hotel_name")).isEqualTo("Legacy Hotel");
       assertThat(

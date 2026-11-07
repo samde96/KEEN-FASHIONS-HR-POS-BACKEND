@@ -174,10 +174,43 @@ public final class HotelModels {
   public record ReceiptSettingsRequest(
       @NotNull UUID branchId,
       @NotBlank @Size(max = 160) String hotelName,
-      @NotBlank @Size(max = 30) @Pattern(regexp = "[0-9 ]+") String tillNumber,
-      @NotBlank @Size(max = 40) String contactPhone) {}
+      @NotBlank @Size(max = 40) String contactPhone,
+      @NotBlank @Size(max = 40) String complaintsPhone,
+      @NotBlank @Pattern(regexp = "PAYBILL|TILL") String paymentType,
+      @NotBlank @Size(max = 30) @Pattern(regexp = "[0-9 ]+") String paymentNumber,
+      @Size(max = 80) String accountNumber) {
+    public ReceiptSettingsRequest(
+        UUID branchId, String hotelName, String tillNumber, String contactPhone) {
+      this(branchId, hotelName, contactPhone, contactPhone, "TILL", tillNumber, "");
+    }
 
-  public record ReceiptSettings(String hotelName, String tillNumber, String contactPhone) {}
+    public ReceiptSettingsRequest(
+        UUID branchId,
+        String hotelName,
+        String contactPhone,
+        String paymentType,
+        String paymentNumber,
+        String accountNumber) {
+      this(
+          branchId,
+          hotelName,
+          contactPhone,
+          contactPhone,
+          paymentType,
+          paymentNumber,
+          accountNumber);
+    }
+  }
+
+  public record ReceiptSettings(
+      String hotelName,
+      String tillNumber,
+      String contactPhone,
+      String paybillNumber,
+      String accountNumber,
+      String paymentType,
+      String paymentNumber,
+      String complaintsPhone) {}
 
   public record Room(
       UUID id,
@@ -305,6 +338,7 @@ public final class HotelModels {
       UUID bookingId,
       String roomNumber,
       String reference,
+      String receiptNumber,
       String customerName,
       BigDecimal total,
       String method,
@@ -320,6 +354,11 @@ public final class HotelModels {
       String hotelName,
       String tillNumber,
       String contactPhone,
+      String complaintsPhone,
+      String paybillNumber,
+      String accountNumber,
+      String paymentType,
+      String paymentNumber,
       Instant paidAt,
       Instant createdAt,
       List<OrderLine> lines) {}

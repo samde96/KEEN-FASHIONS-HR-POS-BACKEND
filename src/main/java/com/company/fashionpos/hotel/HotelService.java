@@ -462,13 +462,23 @@ public class HotelService {
                 new ReceiptSettings(
                     r.getString("hotel_name"),
                     r.getString("till_number"),
-                    r.getString("contact_phone")),
+                    r.getString("contact_phone"),
+                    r.getString("paybill_number"),
+                    r.getString("account_number"),
+                    r.getString("payment_type"),
+                    r.getString("payment_number"),
+                    r.getString("complaints_phone")),
             user.organizationId(),
             branch);
     if (!settings.isEmpty()) return settings.get(0);
     return new ReceiptSettings(
         jdbc.queryForObject(
             "select name from organizations where id=?", String.class, user.organizationId()),
+        "",
+        "",
+        "",
+        "",
+        "TILL",
         "",
         "");
   }
@@ -477,18 +487,29 @@ public class HotelService {
   public ReceiptSettings saveReceiptSettings(
       AuthenticatedUser user, ReceiptSettingsRequest request) {
     administrator(user);
+    if (request.paymentType().equals("PAYBILL") && clean(request.accountNumber()).isBlank())
+      throw new IllegalArgumentException("Account number is required for Paybill payments");
     lock(user, request.branchId());
     jdbc.update(
         """
-        insert into hotel_receipt_settings(branch_id,organization_id,hotel_name,till_number,contact_phone)
-        values (?,?,?,?,?) on conflict (branch_id) do update set hotel_name=excluded.hotel_name,
-          till_number=excluded.till_number,contact_phone=excluded.contact_phone
+        insert into hotel_receipt_settings(branch_id,organization_id,hotel_name,till_number,contact_phone,paybill_number,account_number,
+          payment_type,payment_number,complaints_phone)
+        values (?,?,?,?,?,?,?,?,?,?) on conflict (branch_id) do update set hotel_name=excluded.hotel_name,
+          till_number=excluded.till_number,contact_phone=excluded.contact_phone,
+          paybill_number=excluded.paybill_number,account_number=excluded.account_number,
+          payment_type=excluded.payment_type,payment_number=excluded.payment_number,
+          complaints_phone=excluded.complaints_phone
         """,
         request.branchId(),
         user.organizationId(),
         request.hotelName().trim(),
-        request.tillNumber().replace(" ", ""),
-        request.contactPhone().trim());
+        request.paymentType().equals("TILL") ? request.paymentNumber().replace(" ", "") : "",
+        request.contactPhone().trim(),
+        request.paymentType().equals("PAYBILL") ? request.paymentNumber().replace(" ", "") : "",
+        request.paymentType().equals("PAYBILL") ? clean(request.accountNumber()) : "",
+        request.paymentType(),
+        request.paymentNumber().replace(" ", ""),
+        request.complaintsPhone().trim());
     audit.record(
         user,
         request.branchId(),
@@ -1533,21 +1554,25 @@ public class HotelService {
       total = money(total.add(lineTotal));
     }
     String ref = reference("FOOD", command.target());
+    String receiptNumber =
+        jdbc.queryForObject(
+            "select lpad(nextval('hotel_receipt_number_seq')::text, 6, '0')", String.class);
     String customer = stay == null ? clean(request.customerName()) : stay.guestName();
     if (customer.isBlank()) customer = "Walk-in customer";
     boolean hasFood = lines.stream().anyMatch(line -> line.itemType().equals("FOOD"));
     jdbc.update(
         """
-        insert into hotel_orders(id,organization_id,branch_id,booking_id,reference,customer_name,total,method,payment_reference,
+        insert into hotel_orders(id,organization_id,branch_id,booking_id,reference,receipt_number,customer_name,total,method,payment_reference,
           operator_id,waiter_id,served_by_name,table_number,service_type,notes,status,kitchen_status,
-          hotel_name,till_number,contact_phone,paid_at)
-        values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          hotel_name,till_number,contact_phone,complaints_phone,paybill_number,account_number,payment_type,payment_number,paid_at)
+        values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         command.target(),
         user.organizationId(),
         request.branchId(),
         stay == null ? null : stay.id(),
         ref,
+        receiptNumber,
         customer,
         total,
         request.method(),
@@ -1563,6 +1588,11 @@ public class HotelService {
         settings.hotelName(),
         settings.tillNumber(),
         settings.contactPhone(),
+        settings.complaintsPhone(),
+        settings.paybillNumber(),
+        settings.accountNumber(),
+        settings.paymentType(),
+        settings.paymentNumber(),
         Set.of("UNPAID", "ROOM").contains(request.method()) ? null : Timestamp.from(Instant.now()));
     for (int i = 0; i < lines.size(); i++) {
       OrderLine line = lines.get(i);
@@ -2314,6 +2344,7 @@ public class HotelService {
         uuid(r, "booking_id"),
         r.getString("room_number"),
         r.getString("reference"),
+        r.getString("receipt_number"),
         r.getString("customer_name"),
         r.getBigDecimal("total"),
         r.getString("method"),
@@ -2329,6 +2360,11 @@ public class HotelService {
         r.getString("hotel_name"),
         r.getString("till_number"),
         r.getString("contact_phone"),
+        r.getString("complaints_phone"),
+        r.getString("paybill_number"),
+        r.getString("account_number"),
+        r.getString("payment_type"),
+        r.getString("payment_number"),
         instant(r, "paid_at"),
         instant(r, "created_at"),
         lines);
